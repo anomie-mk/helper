@@ -9,7 +9,7 @@ import { makePdf } from "./pdf.js";
 import { runSetup } from "./setup.js";
 import { startTour } from "./tour.js";
 
-export const APP_VERSION = "1.0.2";
+export const APP_VERSION = "1.0.3";
 const REFRESH_MINUTES = 120;     // 稼働表をこれより古ければ取り込み直す
 const HISTORY_MAX = 30;
 
@@ -1024,15 +1024,47 @@ function bindEvents() {
   }, true);
 }
 
+// ---- 新しい版への入れ替え ----------------------------------------------------------
+
+let swReg = null;
+let updateReady = false;
+
+/** 新しい版が公開されたら、入れ替えて開き直す（作業中なら、終わってから押せる案内を出す）。 */
+function watchUpdates() {
+  if (!("serviceWorker" in navigator) || location.protocol !== "https:") return;
+  const hadController = !!navigator.serviceWorker.controller;   // 初めて開いたときは入れ替えではない
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || updateReady) return;
+    updateReady = true;
+    reloadIfIdle();
+  });
+  navigator.serviceWorker.register("sw.js").then((reg) => { swReg = reg; }).catch(() => {});
+}
+
+function isBusy() {
+  const el = document.activeElement;
+  return !!$("#layer").innerHTML.trim() || !!$(".tour-bubble") || (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+}
+
+function reloadIfIdle() {
+  if (!updateReady) return;
+  if (!isBusy()) { location.reload(); return; }
+  if ($("#update-bar")) return;
+  const bar = document.createElement("div");
+  bar.id = "update-bar";
+  bar.className = "update-bar";
+  bar.innerHTML = `<span>新しい版があります</span><button class="btn small primary">新しくする</button>`;
+  bar.querySelector("button").addEventListener("click", () => location.reload());
+  document.body.appendChild(bar);
+}
+
 // ---- 起動 ---------------------------------------------------------------------
 
 async function boot() {
   clearTimeout(window.__bootTimer);
   bindEvents();
   renderWho();
-  if ("serviceWorker" in navigator && location.protocol === "https:") {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
-  }
+  watchUpdates();
   loadMailTo();
   if (!state.profile?.setupDone) {
     $("#view").innerHTML = "";
@@ -1054,7 +1086,10 @@ function refreshIfOld() {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") refreshIfOld();
+  if (document.visibilityState !== "visible") return;
+  refreshIfOld();
+  swReg?.update().catch(() => {});   // アプリに戻ってきたときも、新しい版が出ていないか確かめる
+  reloadIfIdle();
 });
 
 // できるだけデータを消されないようにお願いする（対応している端末だけ）

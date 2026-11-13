@@ -1,6 +1,6 @@
 // オフラインでも開けるように、アプリの部品をスマホに置いておく。
 // アプリを直したら VERSION を変える（変えると、次に開いたときに新しい部品に入れ替わる）。
-const VERSION = "v1.0.2";
+const VERSION = "v1.0.3";
 const CACHE = `helper-app-${VERSION}`;
 const FILES = [
   "./", "./index.html", "./manifest.webmanifest", "./css/style.css",
@@ -9,7 +9,10 @@ const FILES = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // ブラウザが一時的に覚えている古い部品ではなく、必ず公開場所から取り直す
+  e.waitUntil(caches.open(CACHE)
+    .then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: "reload" }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (e) => {
@@ -25,7 +28,9 @@ self.addEventListener("fetch", (e) => {
   // まずネットから（新しい版があればそれを使う）。電波が弱くて3秒で返らなければ、スマホに置いた部品を使う。
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    const net = fetch(e.request).then((res) => {
+    // 公開場所に「変わったか」を必ず聞く（ブラウザが10分ほど古い部品を使い回すのを防ぐ）
+    // （ページを開くときの要求には条件を足せないので、アドレスから取り直す）
+    const net = fetch(e.request.url, { cache: "no-cache" }).then((res) => {
       if (res.ok) cache.put(e.request, res.clone());
       return res;
     });
