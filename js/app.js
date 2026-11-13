@@ -9,7 +9,7 @@ import { makePdf } from "./pdf.js";
 import { runSetup } from "./setup.js";
 import { startTour } from "./tour.js";
 
-export const APP_VERSION = "1.0.3";
+export const APP_VERSION = "1.0.4";
 const REFRESH_MINUTES = 120;     // 稼働表をこれより古ければ取り込み直す
 const HISTORY_MAX = 30;
 

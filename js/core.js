@@ -1,7 +1,7 @@
 // 申込書の中身（既存の管理統合システムの kanri/helper/core.py から移したもの）
 //
 //  行（希望日）は { start, end, people, meeting, time }。start / end は "2026-10-05" の形。
-//  end が空、または start と同じ日なら1日だけ（紙面の終了日は空欄で「利用日数 1」。既存システムと同じ）。
+//  end が空、または start と同じ日なら1日だけ（紙面には終了日にも開始日と同じ日を書き、「利用日数 1」）。
 
 import { half, parseIso, REIWA_OFFSET, pad2, todayIso, jpDate, shiftYm as shiftYmLocal } from "./util.js";
 import { dayInfo } from "./schedule.js";
@@ -234,10 +234,10 @@ export function toFormData(app) {
     usage_month: +app.usageMonth,
     rows: app.rows.map((row) => {
       const r = tidyRow(row);
-      const s = parseIso(r.start), e = r.end ? parseIso(r.end) : null;
+      const s = parseIso(r.start), e = r.end ? parseIso(r.end) : s;   // 1日だけの行は、終了日＝開始日
       return {
         start_month: s.getMonth() + 1, start_day: s.getDate(),
-        end_month: e ? e.getMonth() + 1 : "", end_day: e ? e.getDate() : "",
+        end_month: e.getMonth() + 1, end_day: e.getDate(),
         days: rowDates(r).length, people: String(+half(r.people)),
         meeting: r.meeting || null, time: normalizeTime(r.time),
       };
