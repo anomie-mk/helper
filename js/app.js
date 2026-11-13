@@ -2,7 +2,7 @@
 //  入力した内容・稼働表の控えは、このスマホのブラウザの中（localStorage）にだけ保存する。
 //  PDFはこのアプリの中には残さず、作るたびに利用者が保存先を選んで保存する。
 
-import { $, $$, esc, store, todayIso, jpDate, reiwaLabel, shiftYm, pad2, daysInMonth, addDays, WEEKDAYS, half, last } from "./util.js";
+import { $, $$, esc, store, todayIso, jpDate, reiwaLabel, shiftYm, pad2, daysInMonth, addDays, WEEKDAYS, half, last, parseIso } from "./util.js";
 import * as S from "./schedule.js";
 import * as C from "./core.js";
 import { makePdf } from "./pdf.js";
@@ -10,7 +10,7 @@ import { runSetup } from "./setup.js";
 import { startTour } from "./tour.js";
 import * as G from "./gcal.js";
 
-export const APP_VERSION = "1.2.0";
+export const APP_VERSION = "1.6.0";
 const REFRESH_MINUTES = 120;     // 稼働表をこれより古ければ取り込み直す
 const HISTORY_MAX = 30;
 
@@ -157,10 +157,9 @@ function rowIndexOf(iso) {
 
 /** カレンダーで日を押した: 申込書に入れる／外す。 */
 function toggleDate(iso) {
-  state.ui.detail = iso;
   if (isPast(iso)) {
-    toast("過ぎた日は選べません（内訳だけ表示します）");
-    return afterRowsChanged(false);
+    toast("過ぎた日は選べません");
+    return;
   }
   const rows = state.app.rows;
   const i = rowIndexOf(iso);
@@ -277,11 +276,11 @@ function renderMake() {
     </section>
 
     <section class="card" id="card-pdf">
-      <div class="card-head"><span class="step-no">3</span><h2>PDFをつくって保存</h2></div>
+      <div class="card-head"><span class="step-no">3</span><h2>申込書をつくって送る</h2></div>
       <div id="check"></div>
-      <button class="btn primary big" id="make-pdf">📄 PDFをつくる</button>
+      <button class="btn primary big" id="make-pdf">📄 申込書をつくる</button>
       <p class="muted small" style="margin-top:8px">つくったPDFはこのアプリの中には残りません。次の画面で、メールで組合へ送ってください（手元に保存もできます）。</p>
-      <div style="text-align:right"><button class="link" id="clear-all">入力をすべて消す</button></div>
+      <button class="btn danger block" id="clear-all" style="margin-top:16px">🗑 入力をすべて消す</button>
     </section>`;
   renderSync();
   renderCalendar();
@@ -333,7 +332,6 @@ function renderCalendar() {
     if (avail != null && avail < people) cls.push("short");
     if (isPast(iso)) cls.push("past");
     if (selected.has(iso)) cls.push("sel");
-    if (state.ui.detail === iso) cls.push("focus");
     if (info?.bookings?.some((b) => S.isOwn(b, ownName))) cls.push("own");
     const n = avail == null ? "—" : avail === 0 ? "×" : `空${avail}`;
     const label = `${m}月${d}日 ${avail == null ? "空き不明" : `空き${avail}名`}${selected.has(iso) ? " 選択中" : ""}`;
@@ -343,7 +341,12 @@ function renderCalendar() {
   const chip = status ? `<span class="status-chip ${status}">${S.STATUS_NAMES[status]}</span>` : `<span class="status-chip">稼働表なし</span>`;
   const note = status ? S.STATUS_NOTES[status] : (state.schedule ? "この月の稼働表はまだ公開されていません。" : "稼働表を読み込むと、空きが色で出ます。");
   const stale = minfo?.stale ? "（前回取り込んだ内容です）" : "";
+  const nSel = state.app.rows.filter((r) => C.rowDates(r).length).length;
   el.innerHTML = `
+    <div class="cal-tools">
+      <span class="muted small">${nSel ? `選んだ日: ${selected.size}日（${nSel}行）` : "まだ日を選んでいません"}</span>
+      <button class="btn small danger" id="clear-checks" ${nSel ? "" : "disabled"}>✕ チェックをすべて消す</button>
+    </div>
     <div class="month-nav">
       <button id="prev-m" aria-label="前の月" ${ym <= lo ? "disabled" : ""}>‹</button>
       <div class="m">${y}年${m}月${chip}</div>
@@ -358,36 +361,7 @@ function renderCalendar() {
       <span><span class="own-mark"></span>あなたの利用</span>
     </div>
     ${people > 1 ? `<p class="muted small" style="margin-top:4px">薄い日は、${people}名分の空きがない日です。</p>` : ""}
-    <div id="detail">${renderDetail()}</div>
     ${renderAvailList()}`;
-}
-
-function renderDetail() {
-  const iso = state.ui.detail;
-  if (!iso) return `<div class="detail muted">日を押すと、その日の内訳（利用している牧場・ヘルパーの休みなど）がここに出ます。</div>`;
-  const info = S.dayInfo(state.schedule, iso);
-  const ownName = state.profile?.userName || "";
-  const idx = rowIndexOf(iso);
-  const inForm = idx >= 0 ? `<div class="hint info">申込書の${idx + 1}行目に入っています。</div>` : "";
-  if (!info) return `<div class="detail"><h3>${jpDate(iso, true)}</h3><p>この月の稼働表はまだありません。空きは分かりません。</p>${inForm}</div>`;
-  const staffN = info.month.staff?.length || 0;
-  let av;
-  if (info.avail == null) av = "空き: 分かりません（稼働表が未作成）";
-  else if (info.source === "stated") av = `空き: ${info.avail}名（組合の書き込み「${esc(info.stated_text)}」）`;
-  else if (info.source === "event") av = `空き: 0名（予定の日）`;
-  else av = `空き: ${info.avail}名（目安: 専任ヘルパー${staffN}名 − 利用${(info.bookings || []).reduce((s, b) => s + b.count, 0)}名 − 休み${(info.off || []).length}名）`;
-  const bookings = (info.bookings || []).map((b) => {
-    const me = S.isOwn(b, ownName);
-    return `<li class="${me ? "me" : ""}">${esc(b.name)}${b.area ? `（${esc(b.area)}）` : ""} ${b.count}名${b.helpers ? ` ${esc(b.helpers)}` : ""}${me ? " ← あなた" : ""}</li>`;
-  }).join("");
-  const events = (info.events || []).map((e) => `<li>${esc(e)}</li>`).join("");
-  const off = (info.off || []).length ? `<p>ヘルパーの休み: ${esc(info.off.join(" "))}${info.off_notes?.length ? `（${esc(info.off_notes.join("・"))}）` : ""}</p>` : "";
-  return `<div class="detail"><h3>${jpDate(iso, true)}</h3>
-    <p class="av">${av}</p>
-    ${bookings ? `<p style="margin:0">利用:</p><ul>${bookings}</ul>` : "<p>利用: なし</p>"}
-    ${events ? `<p style="margin:0">予定:</p><ul>${events}</ul>` : ""}
-    ${off}${inForm}
-    ${isPast(iso) ? `<p class="muted">過ぎた日なので選べません。</p>` : ""}</div>`;
 }
 
 function renderAvailList() {
@@ -441,7 +415,9 @@ function renderForm() {
         <div class="inline"><select id="usage-month">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${+a.usageMonth === i + 1 ? "selected" : ""}>${i + 1}</option>`).join("")}</select><span class="unit">月分</span></div>
       </div>
     </div>
-    <div class="label" style="font-weight:700;margin-bottom:6px">希望日（${a.rows.length}/${C.ROW_COUNT}行）</div>
+    <div class="label" style="font-weight:700;margin-bottom:6px">申込書の紙面（PDFに書く内容）</div>
+    <div id="paper"></div>
+    <div class="label" style="font-weight:700;margin:14px 0 6px">希望日を直す（${a.rows.length}/${C.ROW_COUNT}行）</div>
     <div id="rows">${rows || `<div class="empty-rows">まだ希望日がありません。<br>上のカレンダーで日を押してください。</div>`}</div>
     <button class="btn block" id="add-row" ${a.rows.length >= C.ROW_COUNT ? "disabled" : ""}>＋ 希望日を手で足す</button>
     ${a.rows.length >= C.ROW_COUNT ? `<p class="muted small">申込書の行は${C.ROW_COUNT}行までです。</p>` : ""}`;
@@ -468,6 +444,43 @@ function renderRow(r, i) {
     <div class="row-hints"></div>
     <div style="text-align:right"><button class="btn small danger" data-del="${i}">この行を消す</button></div>
   </div>`;
+}
+
+const MEETING_SHORT = { denwa: "電話確認", toujitsu: "当日", zenjitsu: "前日" };
+
+/** 申込書の紙面に近い形の一覧（全行を一度に見る）。行を押すと、その行の入力欄へ移る。 */
+function renderPaper(errors = currentCheck().errors) {
+  const el = $("#paper");
+  if (!el) return;
+  const p = state.profile || {};
+  const a = state.app;
+  const md = (iso) => { const d = parseIso(iso); return d ? `${d.getMonth() + 1}月${d.getDate()}日` : ""; };
+  const body = Array.from({ length: C.ROW_COUNT }, (_, i) => {
+    const r0 = a.rows[i];
+    if (!r0) return `<tr class="blank"><td class="no">${i + 1}</td><td class="period"><span class="d">月　日</span><span class="d">～月　日</span></td><td></td><td></td><td></td><td></td></tr>`;
+    const r = C.tidyRow(r0);
+    const ok = !!parseIso(r.start);
+    const end = ok ? (r.end && parseIso(r.end) ? r.end : r.start) : "";   // 1日だけでも終了日＝開始日を書く
+    const bad = errors.some((e) => e.row === i);
+    const time = C.normalizeTime(r.time);
+    return `<tr class="${bad ? "bad" : ""}" data-goto="${i}">
+      <td class="no">${i + 1}</td>
+      <td class="period">${ok ? `<span class="d">${md(r.start)}</span><span class="d">～${md(end)}</span>` : `<span class="miss">日付が未入力</span>`}</td>
+      <td>${ok ? C.rowDates(r).length : ""}</td>
+      <td>${esc(half(r.people || ""))}</td>
+      <td class="meet">${r.meeting ? `<span class="circle">${MEETING_SHORT[r.meeting]}</span>` : `<span class="miss">未選択</span>`}</td>
+      <td>${time ? `${esc(time)}時頃` : ""}</td></tr>`;
+  }).join("");
+  el.innerHTML = `<div class="paper">
+    <div class="paper-title">酪農ヘルパー利用申込書</div>
+    <div class="paper-meta"><span>${esc(reiwaLabel(a.applyDate))}</span><span class="month"><b>${+a.usageMonth}</b>月分</span></div>
+    <div class="paper-meta sub"><span>${esc(C.DISTRICT_NAMES[p.district] || "地区未設定")}</span><span>${esc(p.formName || "氏名未設定")}</span></div>
+    <table class="paper-table">
+      <thead><tr><th></th><th>利用期間</th><th>日数</th><th>人員</th><th>打合せ<br>希望形態</th><th>希望<br>時刻</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>
+  <p class="muted small" style="margin-top:6px">${a.rows.length ? "行を押すと、下のその行の入力欄に移ります。" : "上のカレンダーで日を押すと、ここに入ります。"}</p>`;
 }
 
 function currentCheck() {
@@ -498,9 +511,10 @@ function renderCheck() {
     }
   });
   $("#apply-reiwa") && ($("#apply-reiwa").textContent = reiwaLabel(state.app.applyDate));
+  renderPaper(errors);
 
   if (!errors.length) {
-    el.innerHTML = `<div class="check-ok">✓ PDFをつくれます（希望日 ${state.app.rows.length}行）</div>` +
+    el.innerHTML = `<div class="check-ok">✓ 申込書をつくれます（希望日 ${state.app.rows.length}行）</div>` +
       (warnings.length ? `<div class="check-list">${warnings.map((w) => `<div class="hint warn">${esc(w.msg)}</div>`).join("")}</div>` : "");
   } else {
     const list = errors.map((e) => {
@@ -541,10 +555,10 @@ async function onMakePdf() {
     saveHistory();
     showResult(result, filename, app, state.profile, histId);
   } catch (e) {
-    toast(`PDFをつくれませんでした: ${e.message || e}`, 5000);
+    toast(`申込書をつくれませんでした: ${e.message || e}`, 5000);
   } finally {
     btn.disabled = false;
-    btn.textContent = "📄 PDFをつくる";
+    btn.textContent = "📄 申込書をつくる";
   }
 }
 
@@ -736,7 +750,7 @@ async function onHistory(action, id) {
       const result = await makePdf(C.toFormData(h.app), prof);
       showResult(result, h.filename, h.app, prof, h.id);
     } catch (e) {
-      toast(`PDFをつくれませんでした: ${e.message || e}`, 5000);
+      toast(`申込書をつくれませんでした: ${e.message || e}`, 5000);
     }
   } else if (action === "load") {
     if (state.app.rows.length && !(await confirmDialog("申込書に読み込みますか？", "<p>いま入力中の希望日は置き換わります。申込年月日は今日になります。</p>", "読み込む"))) return;
@@ -832,7 +846,7 @@ function showHelp() {
           <li>「頼みたい人数」を選ぶ</li>
           <li>カレンダーで空いている日（緑の日）を押す</li>
           <li>申込書の中身（人数・打合せ形態・時刻）を確かめる</li>
-          <li>「PDFをつくる」→ できた紙面を確かめる</li>
+          <li>「申込書をつくる」→ できた紙面を確かめる</li>
           <li>「メールで組合へ送る」→ メールを選ぶ → 宛先に貼り付けて送信</li>
         </ol>
       </div>
@@ -844,9 +858,9 @@ function showHelp() {
         <details><summary>申込期限は？</summary>
           <p>稼働表の注意書きによると、翌月の利用は毎月1日まで、空いている日の申込は毎月5日の午前中まで（5日が土・日・祝日のときはその前日）です。急ぎのときは組合へ電話してください。</p></details>
         <details><summary>メールの送り方は？</summary>
-          <p>PDFをつくったあとの画面で「✉ メールで組合へ送る」を押し、いつも使うメール（「メール」・Gmail など）を選びます。件名・本文・PDFは入った状態で開きます。宛先は自動で入らないので、「宛先」を長押しして「ペースト」してください（組合のアドレスはボタンを押したときにコピーしてあります）。件名や本文が入っていないときは、画面の「コピー」で写して貼り付けます。</p></details>
+          <p>申込書をつくったあとの画面で「✉ メールで組合へ送る」を押し、いつも使うメール（「メール」・Gmail など）を選びます。件名・本文・PDFは入った状態で開きます。宛先は自動で入らないので、「宛先」を長押しして「ペースト」してください（組合のアドレスはボタンを押したときにコピーしてあります）。件名や本文が入っていないときは、画面の「コピー」で写して貼り付けます。</p></details>
         <details><summary>Googleカレンダーに予定を入れるには？</summary>
-          <p>PDFをつくったあとの画面（または「作成履歴」の「📅 Googleカレンダーに入れる」）に、希望日の行ごとのボタンがあります。押すとGoogleカレンダーが中身の入った状態で開くので、「保存」を押してください。利用日の午後〜最終日の翌日の午前までが、終日の予定で入ります。同じボタンを2回保存すると、予定も2つになります。</p></details>
+          <p>申込書をつくったあとの画面（または「作成履歴」の「📅 Googleカレンダーに入れる」）に、希望日の行ごとのボタンがあります。押すとGoogleカレンダーが中身の入った状態で開くので、「保存」を押してください。利用日の午後〜最終日の翌日の午前までが、終日の予定で入ります。同じボタンを2回保存すると、予定も2つになります。</p></details>
         <details><summary>PDFはどこに保存される？</summary>
           <p>このアプリの中には残りません。「保存先を選んで保存」で、ファイルアプリ・Googleドライブ・LINEなど好きな場所に保存してください。</p></details>
         <details><summary>1日だけ／何日か続けて頼みたい</summary>
@@ -947,11 +961,32 @@ function bindEvents() {
       return;
     }
     if (t.closest("#make-pdf")) return onMakePdf();
+    if (t.closest("#clear-checks")) {
+      const n = state.app.rows.filter((r) => C.rowDates(r).length).length;
+      if (!n) return;
+      if (await confirmDialog("チェックをすべて消しますか？", `<p>カレンダーで選んだ日（申込書の${n}行）をすべて外します。</p>`, "すべて消す", true)) {
+        state.app.rows = state.app.rows.filter((r) => !C.rowDates(r).length);
+        state.ui.showAllErrors = false;
+        autoUsageMonth();
+        afterRowsChanged(true);
+        toast("選んだ日をすべて外しました。");
+      }
+      return;
+    }
+    const goRow = t.closest("[data-goto]");
+    if (goRow && goRow.closest("#paper")) {
+      const card = $(`.row-card[data-row="${goRow.dataset.goto}"]`);
+      if (card) {
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        card.classList.add("flash");
+        setTimeout(() => card.classList.remove("flash"), 1200);
+      }
+      return;
+    }
     if (t.closest("#clear-all")) {
       if (await confirmDialog("入力をすべて消しますか？", "<p>希望日がすべて消え、申込年月日は今日に戻ります。</p>", "消す", true)) {
         state.app = freshApp();
         state.ui.showAllErrors = false;
-        state.ui.detail = null;
         saveDraft();
         renderMake();
       }
@@ -1102,6 +1137,8 @@ async function boot() {
   renderWho();
   watchUpdates();
   loadMailTo();
+  // 前の版（利用IDあり）で残った値を片付ける
+  ["accessHashes", "accessOk", "accessFails", "accessLock", "deviceCode", "unlockDevices"].forEach((k) => store.remove(k));
   if (!state.profile?.setupDone) {
     $("#view").innerHTML = "";
     await runSetup();

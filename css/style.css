@@ -319,3 +319,32 @@ a.btn { display: flex; align-items: center; justify-content: center; }
 .cal-opened { margin-left: auto; font-size: 13px; color: var(--sub); font-weight: 600; }
 .cal-hist { margin-top: 10px; }
 .cal-hist summary { font-weight: 700; color: var(--green); font-size: 15px; padding: 4px 0; }
+
+/* カレンダーの上の道具 */
+.cal-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 10px; flex-wrap: wrap; }
+.cal-tools .btn:disabled { opacity: .4; }
+
+/* 申込書の紙面（確認用） */
+.paper { background: #fff; color: #111; border: 1px solid #9e9e9e; border-radius: 4px; padding: 12px 10px 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.12); font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif; }
+.paper-title { text-align: center; font-weight: 700; font-size: 16px; letter-spacing: .1em; margin-bottom: 6px; }
+.paper-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.paper-meta.sub { margin: 2px 0 8px; color: #333; }
+.paper-meta .month b { font-size: 16px; padding: 0 2px; }
+.paper-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
+.paper-table th, .paper-table td { border: 1px solid #333; padding: 5px 2px; text-align: center; vertical-align: middle; line-height: 1.3; }
+.paper-table th { background: #f1f1f1; font-weight: 600; font-size: 11px; }
+.paper-table th:nth-child(1) { width: 7%; } .paper-table th:nth-child(2) { width: 33%; }
+.paper-table th:nth-child(3), .paper-table th:nth-child(4) { width: 10%; }
+.paper-table th:nth-child(5) { width: 22%; } .paper-table th:nth-child(6) { width: 18%; }
+.paper-table td.period { font-size: 12px; }
+.paper-table td.period .d { display: block; white-space: nowrap; }
+.paper-table .circle { white-space: nowrap; }
+.paper-table tr[data-goto] { cursor: pointer; }
+.paper-table tr[data-goto]:active { background: var(--sel-l); }
+.paper-table tr.blank td { color: #bdbdbd; height: 30px; }
+.paper-table tr.bad td { background: var(--red-l); }
+.paper-table .miss { color: var(--red); font-size: 11px; }
+.paper-table .circle { display: inline-block; border: 1.5px solid #111; border-radius: 999px; padding: 1px 4px; font-size: 11px; }
+.row-card.flash { box-shadow: 0 0 0 3px var(--sel); transition: box-shadow .2s; }
+
