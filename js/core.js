@@ -244,3 +244,36 @@ export function toFormData(app) {
     }),
   };
 }
+
+// ---- メールで送る ----------------------------------------------------------------
+
+export const MAIL_SUBJECT = "酪農ヘルパー利用申請";
+
+/** 希望日の入っている月（重なりなし・古い順）。例: [{year:2027, month:2}, …] */
+export function usageMonths(rows) {
+  const seen = new Map();
+  for (const r of rows) {
+    for (const iso of rowDates(r)) {
+      const key = iso.slice(0, 7);
+      if (!seen.has(key)) seen.set(key, { year: +iso.slice(0, 4), month: +iso.slice(5, 7) });
+    }
+  }
+  return [...seen.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([, v]) => v);
+}
+
+/** 例: 「令和9年2月」「令和9年2月、3月」「令和8年12月、令和9年1月」 */
+export function usageMonthsLabel(rows) {
+  let prevYear = null;
+  return usageMonths(rows).map(({ year, month }) => {
+    const text = year === prevYear ? `${month}月` : `令和${year - REIWA_OFFSET}年${month}月`;
+    prevYear = year;
+    return text;
+  }).join("、");
+}
+
+/** メールの件名と本文。利用者名は稼働表での名前（無ければ申込書の氏名）。 */
+export function mailContent(app, profile = {}) {
+  const user = (profile.userName || profile.formName || "").trim();
+  const body = [`利用者名：${user}`, `利用希望月：${usageMonthsLabel(app.rows)}`].join("\n");
+  return { subject: MAIL_SUBJECT, body };
+}

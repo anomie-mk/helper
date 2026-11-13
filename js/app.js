@@ -9,7 +9,7 @@ import { makePdf } from "./pdf.js";
 import { runSetup } from "./setup.js";
 import { startTour } from "./tour.js";
 
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = "1.0.2";
 const REFRESH_MINUTES = 120;     // 稼働表をこれより古ければ取り込み直す
 const HISTORY_MAX = 30;
 
@@ -21,6 +21,7 @@ export const state = {
   app: store.get("draft", null),
   history: store.get("history", []),
   extraSheets: store.get("extraSheets", []),
+  mailTo: store.get("mailTo", ""),     // 組合のメールアドレス（公開場所の sheets.json から読む）
   ui: { tab: "make", viewYm: null, people: 1, detail: null, fetching: false, progress: 0, progressText: "", fetchError: "", showAllErrors: false },
 };
 
@@ -29,6 +30,17 @@ function freshApp() {
   return { applyDate: t, usageMonth: C.nextMonth(+t.slice(5, 7)), usageManual: false, rows: [] };
 }
 if (!state.app || !Array.isArray(state.app.rows)) state.app = freshApp();
+
+/** 公開場所の sheets.json から、組合のメールアドレスを読む（読めなければ前回の値のまま）。 */
+async function loadMailTo() {
+  try {
+    const r = await fetch("sheets.json", { cache: "no-store" });
+    if (!r.ok) return;
+    const j = await r.json();
+    const to = String(j.mailTo || "").trim();
+    if (to !== state.mailTo) { state.mailTo = to; store.set("mailTo", to); }
+  } catch { /* 電波が無いときは前回の値 */ }
+}
 
 export function saveProfile() { store.set("profile", state.profile); renderWho(); }
 function saveDraft() { store.set("draft", state.app); }
@@ -60,7 +72,7 @@ export function confirmDialog(title, body, okLabel = "はい", danger = false) {
     back.innerHTML = `<div class="dialog" role="dialog" aria-modal="true">
       <h3>${esc(title)}</h3><div>${body}</div>
       <div class="btn-row"><button class="btn" data-a="no">やめる</button>
-      <button class="btn primary ${danger ? "danger" : ""}" data-a="ok" ${danger ? 'style="background:var(--red);border-color:var(--red)"' : ""}>${esc(okLabel)}</button></div></div>`;
+      <button class="btn primary${danger ? " danger" : ""}" data-a="ok">${esc(okLabel)}</button></div></div>`;
     back.addEventListener("click", (e) => {
       const a = e.target.closest("[data-a]")?.dataset.a;
       if (!a && e.target !== back) return;
@@ -267,7 +279,7 @@ function renderMake() {
       <div class="card-head"><span class="step-no">3</span><h2>PDFをつくって保存</h2></div>
       <div id="check"></div>
       <button class="btn primary big" id="make-pdf">📄 PDFをつくる</button>
-      <p class="muted small" style="margin-top:8px">つくったPDFはこのアプリの中には残りません。次の画面で保存先を選んで保存してください。</p>
+      <p class="muted small" style="margin-top:8px">つくったPDFはこのアプリの中には残りません。次の画面で、メールで組合へ送ってください（手元に保存もできます）。</p>
       <div style="text-align:right"><button class="link" id="clear-all">入力をすべて消す</button></div>
     </section>`;
   renderSync();
@@ -525,7 +537,7 @@ async function onMakePdf() {
     state.history.unshift({ id: Date.now(), createdAt: new Date().toISOString(), filename, app, profile: snapshotProfile() });
     state.history = state.history.slice(0, HISTORY_MAX);
     saveHistory();
-    showResult(result, filename);
+    showResult(result, filename, app, state.profile);
   } catch (e) {
     toast(`PDFをつくれませんでした: ${e.message || e}`, 5000);
   } finally {
@@ -543,32 +555,57 @@ function isIOS() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
-function showResult({ pdf, previewUrl }, filename) {
+function showResult({ pdf, previewUrl }, filename, app, profile) {
   const file = new File([pdf], filename, { type: "application/pdf" });
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   const kb = Math.max(1, Math.round(pdf.size / 1024));
   const ios = isIOS();
+  const mail = C.mailContent(app, profile || {});
+  const to = state.mailTo;
   // iPhoneのホーム画面アプリでは、ダウンロードが全画面の表示になり戻れなくなることがあるので、共有だけにする
   const showDl = !(canShare && ios && isStandalone());
+  const copyBtn = (key) => `<button class="btn small copy-btn" data-copy="${key}">コピー</button>`;
+  const mailto = `mailto:${encodeURI(to)}?subject=${encodeURIComponent(mail.subject)}&body=${encodeURIComponent(mail.body.replace(/\n/g, "\r\n"))}`;
   const layer = $("#layer");
   layer.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="申込書ができました">
     <div class="sheet-inner">
       <button class="btn small ghost close-x" data-close>✕ 閉じる</button>
       <h2>申込書ができました</h2>
       <p class="muted">${esc(filename)}（${kb}KB）</p>
-      <div class="hint warn">まだ保存されていません。下のボタンで保存してください。</div>
+      <div class="hint warn">まだ組合へ送っていません。下の「メールで組合へ送る」で送ってください。</div>
       <div class="preview-box" style="margin:12px 0"><img class="preview" src="${previewUrl}" alt="申込書の紙面"></div>
       <p class="muted small">日付・人数・丸の位置・氏名・住所を確かめてください。画像を押すと拡大します（もう一度押すと戻ります）。</p>
-      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
-        ${canShare ? `<button class="btn primary big" id="save-share">📁 保存先を選んで保存</button>` : ""}
-        ${!showDl ? "" : `<button class="btn big ${canShare ? "" : "primary"}" id="save-dl">⬇ PDFをダウンロード</button>`}
+
+      <div class="card mail-card" id="mail-card" style="margin-top:12px">
+        <b>✉ メールで組合へ送る</b>
+        <dl class="mail-kv">
+          <dt>宛先</dt><dd>${to ? `<span class="v">${esc(to)}</span>${copyBtn("to")}` : `<span class="v muted">組合のメールアドレスが、まだアプリに入っていません。宛先は手で入れてください。</span>`}</dd>
+          <dt>件名</dt><dd><span class="v">${esc(mail.subject)}</span>${copyBtn("subject")}</dd>
+          <dt>本文</dt><dd><span class="v" style="white-space:pre-wrap">${esc(mail.body)}</span>${copyBtn("body")}</dd>
+          <dt>添付</dt><dd><span class="v">📄 ${esc(filename)}</span></dd>
+        </dl>
+        ${canShare
+          ? `<button class="btn primary big" id="send-mail" style="margin-top:12px">✉ メールで組合へ送る</button>
+             <ol class="small" style="padding-left:20px;margin:10px 0 0">
+               <li>出てきたメニューで、いつも使うメール（${ios ? "「メール」・Gmail など" : "Gmail など"}）を選ぶ</li>
+               <li>${to ? "「宛先」を長押しして<b>「貼り付け（ペースト）」</b>（組合のアドレスはコピーしてあります）" : "「宛先」に組合のメールアドレスを入れる"}</li>
+               <li>件名・本文・PDFが入っているか確かめて、<b>送信</b>する</li>
+             </ol>
+             <p class="small muted" style="margin-top:6px">件名や本文が入っていないときは、上の「コピー」で写して貼り付けてください。</p>`
+          : `<p class="small" style="margin-top:8px">この端末では、PDFを付けたメールを自動でつくれません。先に下の「PDFをダウンロード」で保存し、次のボタンで開くメールに、そのPDFを添付して送ってください。</p>
+             <a class="btn primary big" id="send-mailto" style="margin-top:8px;text-decoration:none" href="${esc(mailto)}">✉ メールを開く</a>`}
       </div>
-      <div class="card" style="margin-top:14px">
-        <b>保存のしかた</b>
+
+      <div class="card" style="margin-top:12px">
+        <b>手元に保存する（必要なとき）</b>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+          ${canShare ? `<button class="btn" id="save-share">📁 保存先を選んで保存</button>` : ""}
+          ${!showDl ? "" : `<button class="btn" id="save-dl">⬇ PDFをダウンロード</button>`}
+        </div>
         ${!canShare ? ""
           : ios
-          ? `<p class="small">「保存先を選んで保存」→ 出てきたメニューで<b>「"ファイル"に保存」</b>を選ぶと、保存する場所（iCloud Drive・このiPhone内など）を選べます。LINEやメールに直接送ることもできます。</p>`
-          : `<p class="small">「保存先を選んで保存」→ 出てきたメニューで、Googleドライブ・LINE・メールなど送り先（保存先）を選べます。</p>`}
+          ? `<p class="small" style="margin-top:8px">「保存先を選んで保存」→ 出てきたメニューで<b>「"ファイル"に保存」</b>を選ぶと、保存する場所（iCloud Drive・このiPhone内など）を選べます。</p>`
+          : `<p class="small" style="margin-top:8px">「保存先を選んで保存」→ 出てきたメニューで、Googleドライブなど保存先を選べます。</p>`}
         ${!showDl ? ""
           : ios
           ? `<p class="small">「ダウンロード」は「ファイル」アプリの「ダウンロード」フォルダに入ります。</p>`
@@ -580,6 +617,21 @@ function showResult({ pdf, previewUrl }, filename) {
   const close = () => { layer.innerHTML = ""; URL.revokeObjectURL(previewUrl); };
   $$("[data-close]", layer).forEach((b) => b.addEventListener("click", close));
   $(".preview", layer).addEventListener("click", () => $(".preview-box", layer).classList.toggle("zoom"));
+  const copyTexts = { to, subject: mail.subject, body: mail.body };
+  $$("[data-copy]", layer).forEach((b) => b.addEventListener("click", async () => {
+    const ok = await copyText(copyTexts[b.dataset.copy]);
+    toast(ok ? "コピーしました。貼り付けたいところを長押しして「ペースト」してください。" : "コピーできませんでした。文字を長押しして選び、コピーしてください。", 3500);
+  }));
+  $("#send-mail", layer)?.addEventListener("click", async () => {
+    // 宛先は共有では入れられないので、先にコピーしておく（待たずに共有を開く。待つと共有を開けない端末がある）
+    if (to) copyText(to);
+    try {
+      await navigator.share({ files: [file], title: mail.subject, text: mail.body });
+      toast(to ? "宛先に組合のアドレスを貼り付けて、送信してください。" : "宛先を入れて、送信してください。", 5000);
+    } catch (e) {
+      if (e?.name !== "AbortError") toast("メールの画面を開けませんでした。PDFを保存して、メールに添付してください。", 5000);
+    }
+  });
   $("#save-share", layer)?.addEventListener("click", async () => {
     try {
       await navigator.share({ files: [file], title: filename });
@@ -599,6 +651,27 @@ function showResult({ pdf, previewUrl }, filename) {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
     toast("ダウンロードを始めました。保存されたか確かめてください。", 4000);
   });
+}
+
+/** 文字をコピーする（新しいやり方が使えない端末では、昔のやり方で）。 */
+function copyText(text) {
+  if (!text) return Promise.resolve(false);
+  const fallback = () => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch { return false; }
+  };
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text).then(() => true, () => fallback());
+  return Promise.resolve(fallback());
 }
 
 // ---- 画面: 作成履歴 --------------------------------------------------------------
@@ -627,7 +700,7 @@ async function onHistory(action, id) {
     try {
       const prof = { ...(state.profile || {}), ...(h.profile || {}) };
       const result = await makePdf(C.toFormData(h.app), prof);
-      showResult(result, h.filename);
+      showResult(result, h.filename, h.app, prof);
     } catch (e) {
       toast(`PDFをつくれませんでした: ${e.message || e}`, 5000);
     }
@@ -725,8 +798,8 @@ function showHelp() {
           <li>「頼みたい人数」を選ぶ</li>
           <li>カレンダーで空いている日（緑の日）を押す</li>
           <li>申込書の中身（人数・打合せ形態・時刻）を確かめる</li>
-          <li>「PDFをつくる」→ 保存先を選んで保存</li>
-          <li>保存したPDFを、いつもの方法（FAXなど）で組合へ送る</li>
+          <li>「PDFをつくる」→ できた紙面を確かめる</li>
+          <li>「メールで組合へ送る」→ メールを選ぶ → 宛先に貼り付けて送信</li>
         </ol>
       </div>
       <div class="card faq">
@@ -736,6 +809,8 @@ function showHelp() {
           <p>稼働表を読み込めていません。電波の良いところで「↻ 最新にする」を押してください。まだ組合が作っていない月は色が出ません。</p></details>
         <details><summary>申込期限は？</summary>
           <p>稼働表の注意書きによると、翌月の利用は毎月1日まで、空いている日の申込は毎月5日の午前中まで（5日が土・日・祝日のときはその前日）です。急ぎのときは組合へ電話してください。</p></details>
+        <details><summary>メールの送り方は？</summary>
+          <p>PDFをつくったあとの画面で「✉ メールで組合へ送る」を押し、いつも使うメール（「メール」・Gmail など）を選びます。件名・本文・PDFは入った状態で開きます。宛先は自動で入らないので、「宛先」を長押しして「ペースト」してください（組合のアドレスはボタンを押したときにコピーしてあります）。件名や本文が入っていないときは、画面の「コピー」で写して貼り付けます。</p></details>
         <details><summary>PDFはどこに保存される？</summary>
           <p>このアプリの中には残りません。「保存先を選んで保存」で、ファイルアプリ・Googleドライブ・LINEなど好きな場所に保存してください。</p></details>
         <details><summary>1日だけ／何日か続けて頼みたい</summary>
@@ -958,6 +1033,7 @@ async function boot() {
   if ("serviceWorker" in navigator && location.protocol === "https:") {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
+  loadMailTo();
   if (!state.profile?.setupDone) {
     $("#view").innerHTML = "";
     await runSetup();

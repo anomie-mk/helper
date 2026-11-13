@@ -95,6 +95,7 @@ main { padding: 12px 12px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 2
 .btn.big { min-height: 58px; font-size: 18px; width: 100%; }
 .btn.block { width: 100%; }
 .btn.danger { border-color: var(--red); color: var(--red); }
+.btn.primary.danger { background: var(--red); border-color: var(--red); color: #fff; }
 .btn.ghost { border-color: transparent; background: transparent; }
 .btn.small { min-height: 38px; padding: 0 12px; font-size: 14px; border-radius: 10px; }
 .btn:disabled { opacity: .45; }
@@ -294,3 +295,11 @@ input[type="date"] { min-width: 0; max-width: 100%; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 14px; }
 .kv dt { color: var(--sub); }
 .kv dd { margin: 0; font-weight: 600; word-break: break-all; }
+
+/* メールで送る */
+.mail-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; margin: 10px 0 0; font-size: 14px; align-items: center; }
+.mail-kv dt { color: var(--sub); }
+.mail-kv dd { margin: 0; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mail-kv dd .v { flex: 1; min-width: 0; font-weight: 600; word-break: break-all; }
+.copy-btn { flex: none; min-height: 34px; padding: 0 10px; font-size: 13px; }
+a.btn { display: flex; align-items: center; justify-content: center; }

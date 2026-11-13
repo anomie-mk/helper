@@ -51,7 +51,7 @@ export function runSetup({ redo = false } = {}) {
         <ul class="points">
           <li><span class="em">📅</span><span>組合の<b>稼働表</b>を読み込んで、ヘルパーの空いている日をカレンダーで見られます。</span></li>
           <li><span class="em">👆</span><span>空いている日を<b>押すだけ</b>で、申込書に日付が入ります。</span></li>
-          <li><span class="em">📄</span><span>申込書を<b>PDF</b>にして、好きな場所に保存できます。</span></li>
+          <li><span class="em">📄</span><span>申込書を<b>PDF</b>にして、そのまま<b>メールで組合へ送れます</b>。</span></li>
           <li><span class="em">🔒</span><span>入力した内容は<b>このスマホの中だけ</b>に保存されます。</span></li>
         </ul>
         ${envNotice()}
