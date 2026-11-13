@@ -10,7 +10,7 @@ import { runSetup } from "./setup.js";
 import { startTour } from "./tour.js";
 import * as G from "./gcal.js";
 
-export const APP_VERSION = "1.1.0";
+export const APP_VERSION = "1.2.0";
 const REFRESH_MINUTES = 120;     // 稼働表をこれより古ければ取り込み直す
 const HISTORY_MAX = 30;
 
@@ -32,7 +32,7 @@ function freshApp() {
 }
 if (!state.app || !Array.isArray(state.app.rows)) state.app = freshApp();
 
-/** 公開場所の sheets.json から、組合のメールアドレスとGoogle連携の設定を読む（読めなければ前回の値のまま）。 */
+/** 公開場所の sheets.json から、組合のメールアドレスを読む（読めなければ前回の値のまま）。 */
 async function loadMailTo() {
   try {
     const r = await fetch("sheets.json", { cache: "no-store" });
@@ -40,7 +40,6 @@ async function loadMailTo() {
     const j = await r.json();
     const to = String(j.mailTo || "").trim();
     if (to !== state.mailTo) { state.mailTo = to; store.set("mailTo", to); }
-    store.set("googleClientId", String(j.googleClientId || "").trim());
   } catch { /* 電波が無いときは前回の値 */ }
 }
 
@@ -622,7 +621,7 @@ function showResult({ pdf, previewUrl }, filename, app, profile, histId) {
   const close = () => { layer.innerHTML = ""; URL.revokeObjectURL(previewUrl); };
   $$("[data-close]", layer).forEach((b) => b.addEventListener("click", close));
   $(".preview", layer).addEventListener("click", () => $(".preview-box", layer).classList.toggle("zoom"));
-  bindCalendarCard(layer, histId);
+  $("#cal-card", layer)?.addEventListener("click", (e) => { const a = e.target.closest(".cal-link"); if (a) markCalendarLink(a); });
   const copyTexts = { to, subject: mail.subject, body: mail.body };
   $$("[data-copy]", layer).forEach((b) => b.addEventListener("click", async () => {
     const ok = await copyText(copyTexts[b.dataset.copy]);
@@ -680,90 +679,30 @@ function copyText(text) {
   return Promise.resolve(fallback());
 }
 
-// ---- Googleカレンダー ------------------------------------------------------------
+// ---- Googleカレンダー（予定作成リンク） ---------------------------------------------
 
-function calWhen(iso) {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+/** 行ごとの「Googleカレンダーで開く」リンク。押すと、中身の入った予定の画面が開く。 */
+function calendarLinksHtml(h) {
+  return G.buildEvents(h.app, h.filename).map((e) =>
+    `<a class="btn cal-link" href="${esc(e.url)}" target="_blank" rel="noopener">📅 ${esc(e.label)}</a>`).join("");
 }
 
-/** PDFの画面のカレンダー欄（Google連携が設定されていないときは出さない）。 */
+/** PDFの画面のカレンダー欄。 */
 function calendarCardHtml(histId) {
   const h = state.history.find((x) => x.id === histId);
-  if (!G.enabled() || !h) return "";
-  const events = G.buildEvents(h.app, h.filename, h.id);
+  if (!h) return "";
   return `<div class="card cal-card" id="cal-card" style="margin-top:12px">
     <b>📅 Googleカレンダーに予定を入れる</b>
-    <ul class="small cal-list">${events.map((e) => `<li>${esc(e.label)}<span class="muted">（終日）</span></li>`).join("")}</ul>
-    <div id="cal-state">${calendarStateHtml(h)}</div>
+    <p class="small" style="margin:6px 0 10px">希望日の行ごとにボタンがあります。押すとGoogleカレンダーが開くので、中身を確かめて<b>「保存」</b>を押してください（終日の予定で、開始日〜最終日の翌日までが入っています）。</p>
+    <div class="cal-links">${calendarLinksHtml(h)}</div>
   </div>`;
 }
 
-function calendarStateHtml(h) {
-  return h.calendar
-    ? `<p class="cal-done">✅ 登録済み（${calWhen(h.calendar.at)}）</p>
-       <button class="link" data-cal-add>入れ直す（消した予定を戻す・中身を直す）</button>`
-    : `<button class="btn big" data-cal-add>📅 Googleカレンダーに入れる</button>
-       <p class="small muted" style="margin-top:6px">あなたのGoogleアカウントのカレンダーに、希望日の行ごとに入ります。初めてのときはGoogleの画面で「許可」を押します（そのあと、この画面に戻ってきます）。何度押しても二重には入りません。</p>`;
-}
-
-function bindCalendarCard(root, histId) {
-  $("#cal-card", root)?.addEventListener("click", (e) => {
-    if (e.target.closest("[data-cal-add]")) addToCalendar(histId, { reopen: true });
-  });
-}
-
-let calBusy = false;
-
-/** 予定を入れる。鍵が無ければGoogleの許可画面へ移り、戻ってきたら resumeCalendar で続ける。 */
-async function addToCalendar(histId, { reopen }) {
-  const h = state.history.find((x) => x.id === histId);
-  if (!h || calBusy) return;
-  const token = G.validToken();
-  if (!token) {
-    if (navigator.onLine === false) { toast("電波の良いところで、もう一度押してください。", 4000); return; }
-    toast("Googleの画面に移ります…", 3000);
-    G.startAuth({ histId, reopen });
-    return;
-  }
-  calBusy = true;
-  const st = $("#cal-state");
-  if (st) st.innerHTML = `<p class="muted">カレンダーに入れています…</p>`;
-  try {
-    const { added, updated } = await G.insertEvents(G.buildEvents(h.app, h.filename, h.id), token);
-    h.calendar = { at: new Date().toISOString(), count: added + updated };
-    saveHistory();
-    toast(updated && !added ? `カレンダーの予定（${updated}件）を入れ直しました。` : `Googleカレンダーに${added + updated}件の予定を入れました。`, 4000);
-  } catch (e) {
-    if (G.isAuthError(e)) {
-      calBusy = false;
-      G.startAuth({ histId, reopen });
-      return;
-    }
-    toast(`${e.message || e}`, 6000);
-  } finally {
-    calBusy = false;
-    const st2 = $("#cal-state");
-    if (st2) st2.innerHTML = calendarStateHtml(h);
-    if (state.ui.tab === "history" && !$("#layer").innerHTML.trim()) renderHistory();
-  }
-}
-
-/** Googleの許可画面から戻ってきたとき、続きをする（PDFの画面から来たときは、その画面を開き直す）。 */
-async function resumeCalendar() {
-  const r = G.takeAuthResult();
-  if (!r) return;
-  if (r.error) { toast(r.error, 6000); }
-  const p = r.pending;
-  if (!p) return;
-  const h = state.history.find((x) => x.id === p.histId);
-  if (!h) return;
-  if (p.reopen) {
-    await onHistory("pdf", h.id);
-  } else {
-    switchTab("history");
-  }
-  if (r.token) addToCalendar(h.id, { reopen: p.reopen });
+/** 押したリンクに印を付ける（この画面のあいだだけ）。 */
+function markCalendarLink(a) {
+  if (a.dataset.opened) return;
+  a.dataset.opened = "1";
+  a.insertAdjacentHTML("beforeend", `<span class="cal-opened">✓ 開きました</span>`);
 }
 
 // ---- 画面: 作成履歴 --------------------------------------------------------------
@@ -777,9 +716,9 @@ function renderHistory() {
       <div class="muted small">${when.getMonth() + 1}月${when.getDate()}日 ${pad2(when.getHours())}:${pad2(when.getMinutes())} につくった ／ ${+h.app.usageMonth}月分・申込日 ${esc(reiwaLabel(h.app.applyDate))}</div>
       <ul>${rows}</ul>
       <div class="btn-row"><button class="btn small" data-h="pdf">📄 もう一度PDFに</button><button class="btn small" data-h="load">✏️ 直して使う</button></div>
-      ${G.enabled() ? `<div class="cal-line">${h.calendar
-        ? `<span class="cal-done">📅 カレンダーに登録済み（${calWhen(h.calendar.at)}）</span><button class="link" data-h="cal">入れ直す</button>`
-        : `<button class="btn small block" data-h="cal">📅 Googleカレンダーに入れる</button>`}</div>` : ""}
+      <details class="cal-hist"><summary>📅 Googleカレンダーに入れる</summary>
+        <p class="small muted" style="margin:6px 0 8px">押すとGoogleカレンダーが開くので「保存」を押します。</p>
+        <div class="cal-links">${calendarLinksHtml(h)}</div></details>
       <div style="text-align:right;margin-top:6px"><button class="link" data-h="del" style="color:var(--red)">履歴から消す</button></div>
     </div>`;
   }).join("");
@@ -807,8 +746,6 @@ async function onHistory(action, id) {
     saveDraft();
     switchTab("make");
     toast("申込書に読み込みました。日付を確かめてください。");
-  } else if (action === "cal") {
-    addToCalendar(id, { reopen: false });
   } else if (action === "del") {
     if (!(await confirmDialog("履歴から消しますか？", `<p>${esc(h.filename)}</p><p class="muted small">保存したPDFや、Googleカレンダーに入れた予定は消えません。</p>`, "消す", true))) return;
     state.history = state.history.filter((x) => x.id !== id);
@@ -867,7 +804,7 @@ function renderSettings() {
         <button class="btn block danger" id="s-reset">このスマホのデータをすべて消す</button>
       </div>
       <p class="muted small" style="margin-top:10px">入力した内容は、このスマホの中にだけ保存されます（どこにも送りません）。稼働表は組合が公開しているGoogleスプレッドシートから読み込みます。</p>
-      <p class="muted small">バージョン ${APP_VERSION}</p>
+      <p class="muted small">バージョン ${APP_VERSION}　<a href="privacy.html">プライバシーポリシー</a></p>
     </section>`;
 }
 
@@ -908,8 +845,8 @@ function showHelp() {
           <p>稼働表の注意書きによると、翌月の利用は毎月1日まで、空いている日の申込は毎月5日の午前中まで（5日が土・日・祝日のときはその前日）です。急ぎのときは組合へ電話してください。</p></details>
         <details><summary>メールの送り方は？</summary>
           <p>PDFをつくったあとの画面で「✉ メールで組合へ送る」を押し、いつも使うメール（「メール」・Gmail など）を選びます。件名・本文・PDFは入った状態で開きます。宛先は自動で入らないので、「宛先」を長押しして「ペースト」してください（組合のアドレスはボタンを押したときにコピーしてあります）。件名や本文が入っていないときは、画面の「コピー」で写して貼り付けます。</p></details>
-        ${G.enabled() ? `<details><summary>Googleカレンダーに予定を入れるには？</summary>
-          <p>PDFをつくったあとの画面（または「作成履歴」）の「📅 Googleカレンダーに入れる」を押します。初めてのときはGoogleの画面に移るので、使うアカウントを選んで「許可」を押してください（「確認されていないアプリ」と出たときは「詳細」→「（アプリ名）に移動」）。希望日の行ごとに、利用日の午後〜最終日の翌日の午前までが終日の予定で入ります。何度押しても二重には入りません。</p></details>` : ""}
+        <details><summary>Googleカレンダーに予定を入れるには？</summary>
+          <p>PDFをつくったあとの画面（または「作成履歴」の「📅 Googleカレンダーに入れる」）に、希望日の行ごとのボタンがあります。押すとGoogleカレンダーが中身の入った状態で開くので、「保存」を押してください。利用日の午後〜最終日の翌日の午前までが、終日の予定で入ります。同じボタンを2回保存すると、予定も2つになります。</p></details>
         <details><summary>PDFはどこに保存される？</summary>
           <p>このアプリの中には残りません。「保存先を選んで保存」で、ファイルアプリ・Googleドライブ・LINEなど好きな場所に保存してください。</p></details>
         <details><summary>1日だけ／何日か続けて頼みたい</summary>
@@ -1175,7 +1112,6 @@ async function boot() {
   }
   switchTab("make");
   refreshIfOld();
-  resumeCalendar();
 }
 
 /** 稼働表が古ければ、裏で取り込み直す（開いたとき・アプリに戻ってきたとき）。 */

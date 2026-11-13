@@ -2,8 +2,6 @@
   "説明": "組合の稼働表一覧（Notion）に新しい年度のスプレッドシートが増えたら、そのURLを sheets に足してください。アプリを開いた全員に届きます。",
   "mailTo": "",
   "mailTo_説明": "組合の申込受付のメールアドレス。決まったら mailTo に入れて上げ直すと、全員のアプリの宛先に出ます。",
-  "googleClientId": "420072148088-mts8n2am583637ih6l6l47h4oi64un5v.apps.googleusercontent.com",
-  "googleClientId_説明": "Googleカレンダー連携のOAuthクライアントID（…apps.googleusercontent.com）。空のあいだは、カレンダーのボタンを出しません。",
   "sheets": [
     { "年度": "R8年度", "url": "https://docs.google.com/spreadsheets/d/1LqAFw6lvQdu-HSGyLDg0eiLfgEcZuJjqAzcj0gPc15o" },
     { "年度": "R9年度", "url": "https://docs.google.com/spreadsheets/d/1DWMewhoj-vc3VNagQG7q7ZSx4aRs871b1-9Tpz7WVDA" },
