@@ -8,8 +8,9 @@ import * as C from "./core.js";
 import { makePdf } from "./pdf.js";
 import { runSetup } from "./setup.js";
 import { startTour } from "./tour.js";
+import * as G from "./gcal.js";
 
-export const APP_VERSION = "1.0.4";
+export const APP_VERSION = "1.1.0";
 const REFRESH_MINUTES = 120;     // 稼働表をこれより古ければ取り込み直す
 const HISTORY_MAX = 30;
 
@@ -31,7 +32,7 @@ function freshApp() {
 }
 if (!state.app || !Array.isArray(state.app.rows)) state.app = freshApp();
 
-/** 公開場所の sheets.json から、組合のメールアドレスを読む（読めなければ前回の値のまま）。 */
+/** 公開場所の sheets.json から、組合のメールアドレスとGoogle連携の設定を読む（読めなければ前回の値のまま）。 */
 async function loadMailTo() {
   try {
     const r = await fetch("sheets.json", { cache: "no-store" });
@@ -39,6 +40,7 @@ async function loadMailTo() {
     const j = await r.json();
     const to = String(j.mailTo || "").trim();
     if (to !== state.mailTo) { state.mailTo = to; store.set("mailTo", to); }
+    store.set("googleClientId", String(j.googleClientId || "").trim());
   } catch { /* 電波が無いときは前回の値 */ }
 }
 
@@ -534,10 +536,11 @@ async function onMakePdf() {
     const filename = `${C.filenameBase(app.applyDate, app.rows)}.pdf`;
     const result = await makePdf(C.toFormData(app), state.profile);
     // 作成履歴（入力した中身だけ。PDFは残さない）
-    state.history.unshift({ id: Date.now(), createdAt: new Date().toISOString(), filename, app, profile: snapshotProfile() });
+    const histId = Date.now();
+    state.history.unshift({ id: histId, createdAt: new Date().toISOString(), filename, app, profile: snapshotProfile() });
     state.history = state.history.slice(0, HISTORY_MAX);
     saveHistory();
-    showResult(result, filename, app, state.profile);
+    showResult(result, filename, app, state.profile, histId);
   } catch (e) {
     toast(`PDFをつくれませんでした: ${e.message || e}`, 5000);
   } finally {
@@ -555,7 +558,7 @@ function isIOS() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
-function showResult({ pdf, previewUrl }, filename, app, profile) {
+function showResult({ pdf, previewUrl }, filename, app, profile, histId) {
   const file = new File([pdf], filename, { type: "application/pdf" });
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   const kb = Math.max(1, Math.round(pdf.size / 1024));
@@ -596,6 +599,8 @@ function showResult({ pdf, previewUrl }, filename, app, profile) {
              <a class="btn primary big" id="send-mailto" style="margin-top:8px;text-decoration:none" href="${esc(mailto)}">✉ メールを開く</a>`}
       </div>
 
+      ${calendarCardHtml(histId)}
+
       <div class="card" style="margin-top:12px">
         <b>手元に保存する（必要なとき）</b>
         <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
@@ -617,6 +622,7 @@ function showResult({ pdf, previewUrl }, filename, app, profile) {
   const close = () => { layer.innerHTML = ""; URL.revokeObjectURL(previewUrl); };
   $$("[data-close]", layer).forEach((b) => b.addEventListener("click", close));
   $(".preview", layer).addEventListener("click", () => $(".preview-box", layer).classList.toggle("zoom"));
+  bindCalendarCard(layer, histId);
   const copyTexts = { to, subject: mail.subject, body: mail.body };
   $$("[data-copy]", layer).forEach((b) => b.addEventListener("click", async () => {
     const ok = await copyText(copyTexts[b.dataset.copy]);
@@ -674,6 +680,92 @@ function copyText(text) {
   return Promise.resolve(fallback());
 }
 
+// ---- Googleカレンダー ------------------------------------------------------------
+
+function calWhen(iso) {
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+/** PDFの画面のカレンダー欄（Google連携が設定されていないときは出さない）。 */
+function calendarCardHtml(histId) {
+  const h = state.history.find((x) => x.id === histId);
+  if (!G.enabled() || !h) return "";
+  const events = G.buildEvents(h.app, h.filename, h.id);
+  return `<div class="card cal-card" id="cal-card" style="margin-top:12px">
+    <b>📅 Googleカレンダーに予定を入れる</b>
+    <ul class="small cal-list">${events.map((e) => `<li>${esc(e.label)}<span class="muted">（終日）</span></li>`).join("")}</ul>
+    <div id="cal-state">${calendarStateHtml(h)}</div>
+  </div>`;
+}
+
+function calendarStateHtml(h) {
+  return h.calendar
+    ? `<p class="cal-done">✅ 登録済み（${calWhen(h.calendar.at)}）</p>
+       <button class="link" data-cal-add>入れ直す（消した予定を戻す・中身を直す）</button>`
+    : `<button class="btn big" data-cal-add>📅 Googleカレンダーに入れる</button>
+       <p class="small muted" style="margin-top:6px">あなたのGoogleアカウントのカレンダーに、希望日の行ごとに入ります。初めてのときはGoogleの画面で「許可」を押します（そのあと、この画面に戻ってきます）。何度押しても二重には入りません。</p>`;
+}
+
+function bindCalendarCard(root, histId) {
+  $("#cal-card", root)?.addEventListener("click", (e) => {
+    if (e.target.closest("[data-cal-add]")) addToCalendar(histId, { reopen: true });
+  });
+}
+
+let calBusy = false;
+
+/** 予定を入れる。鍵が無ければGoogleの許可画面へ移り、戻ってきたら resumeCalendar で続ける。 */
+async function addToCalendar(histId, { reopen }) {
+  const h = state.history.find((x) => x.id === histId);
+  if (!h || calBusy) return;
+  const token = G.validToken();
+  if (!token) {
+    if (navigator.onLine === false) { toast("電波の良いところで、もう一度押してください。", 4000); return; }
+    toast("Googleの画面に移ります…", 3000);
+    G.startAuth({ histId, reopen });
+    return;
+  }
+  calBusy = true;
+  const st = $("#cal-state");
+  if (st) st.innerHTML = `<p class="muted">カレンダーに入れています…</p>`;
+  try {
+    const { added, updated } = await G.insertEvents(G.buildEvents(h.app, h.filename, h.id), token);
+    h.calendar = { at: new Date().toISOString(), count: added + updated };
+    saveHistory();
+    toast(updated && !added ? `カレンダーの予定（${updated}件）を入れ直しました。` : `Googleカレンダーに${added + updated}件の予定を入れました。`, 4000);
+  } catch (e) {
+    if (G.isAuthError(e)) {
+      calBusy = false;
+      G.startAuth({ histId, reopen });
+      return;
+    }
+    toast(`${e.message || e}`, 6000);
+  } finally {
+    calBusy = false;
+    const st2 = $("#cal-state");
+    if (st2) st2.innerHTML = calendarStateHtml(h);
+    if (state.ui.tab === "history" && !$("#layer").innerHTML.trim()) renderHistory();
+  }
+}
+
+/** Googleの許可画面から戻ってきたとき、続きをする（PDFの画面から来たときは、その画面を開き直す）。 */
+async function resumeCalendar() {
+  const r = G.takeAuthResult();
+  if (!r) return;
+  if (r.error) { toast(r.error, 6000); }
+  const p = r.pending;
+  if (!p) return;
+  const h = state.history.find((x) => x.id === p.histId);
+  if (!h) return;
+  if (p.reopen) {
+    await onHistory("pdf", h.id);
+  } else {
+    switchTab("history");
+  }
+  if (r.token) addToCalendar(h.id, { reopen: p.reopen });
+}
+
 // ---- 画面: 作成履歴 --------------------------------------------------------------
 
 function renderHistory() {
@@ -685,6 +777,9 @@ function renderHistory() {
       <div class="muted small">${when.getMonth() + 1}月${when.getDate()}日 ${pad2(when.getHours())}:${pad2(when.getMinutes())} につくった ／ ${+h.app.usageMonth}月分・申込日 ${esc(reiwaLabel(h.app.applyDate))}</div>
       <ul>${rows}</ul>
       <div class="btn-row"><button class="btn small" data-h="pdf">📄 もう一度PDFに</button><button class="btn small" data-h="load">✏️ 直して使う</button></div>
+      ${G.enabled() ? `<div class="cal-line">${h.calendar
+        ? `<span class="cal-done">📅 カレンダーに登録済み（${calWhen(h.calendar.at)}）</span><button class="link" data-h="cal">入れ直す</button>`
+        : `<button class="btn small block" data-h="cal">📅 Googleカレンダーに入れる</button>`}</div>` : ""}
       <div style="text-align:right;margin-top:6px"><button class="link" data-h="del" style="color:var(--red)">履歴から消す</button></div>
     </div>`;
   }).join("");
@@ -700,7 +795,7 @@ async function onHistory(action, id) {
     try {
       const prof = { ...(state.profile || {}), ...(h.profile || {}) };
       const result = await makePdf(C.toFormData(h.app), prof);
-      showResult(result, h.filename, h.app, prof);
+      showResult(result, h.filename, h.app, prof, h.id);
     } catch (e) {
       toast(`PDFをつくれませんでした: ${e.message || e}`, 5000);
     }
@@ -712,8 +807,10 @@ async function onHistory(action, id) {
     saveDraft();
     switchTab("make");
     toast("申込書に読み込みました。日付を確かめてください。");
+  } else if (action === "cal") {
+    addToCalendar(id, { reopen: false });
   } else if (action === "del") {
-    if (!(await confirmDialog("履歴から消しますか？", `<p>${esc(h.filename)}</p><p class="muted small">保存したPDFは消えません。</p>`, "消す", true))) return;
+    if (!(await confirmDialog("履歴から消しますか？", `<p>${esc(h.filename)}</p><p class="muted small">保存したPDFや、Googleカレンダーに入れた予定は消えません。</p>`, "消す", true))) return;
     state.history = state.history.filter((x) => x.id !== id);
     saveHistory();
     renderHistory();
@@ -811,6 +908,8 @@ function showHelp() {
           <p>稼働表の注意書きによると、翌月の利用は毎月1日まで、空いている日の申込は毎月5日の午前中まで（5日が土・日・祝日のときはその前日）です。急ぎのときは組合へ電話してください。</p></details>
         <details><summary>メールの送り方は？</summary>
           <p>PDFをつくったあとの画面で「✉ メールで組合へ送る」を押し、いつも使うメール（「メール」・Gmail など）を選びます。件名・本文・PDFは入った状態で開きます。宛先は自動で入らないので、「宛先」を長押しして「ペースト」してください（組合のアドレスはボタンを押したときにコピーしてあります）。件名や本文が入っていないときは、画面の「コピー」で写して貼り付けます。</p></details>
+        ${G.enabled() ? `<details><summary>Googleカレンダーに予定を入れるには？</summary>
+          <p>PDFをつくったあとの画面（または「作成履歴」）の「📅 Googleカレンダーに入れる」を押します。初めてのときはGoogleの画面に移るので、使うアカウントを選んで「許可」を押してください（「確認されていないアプリ」と出たときは「詳細」→「（アプリ名）に移動」）。希望日の行ごとに、利用日の午後〜最終日の翌日の午前までが終日の予定で入ります。何度押しても二重には入りません。</p></details>` : ""}
         <details><summary>PDFはどこに保存される？</summary>
           <p>このアプリの中には残りません。「保存先を選んで保存」で、ファイルアプリ・Googleドライブ・LINEなど好きな場所に保存してください。</p></details>
         <details><summary>1日だけ／何日か続けて頼みたい</summary>
@@ -1076,6 +1175,7 @@ async function boot() {
   }
   switchTab("make");
   refreshIfOld();
+  resumeCalendar();
 }
 
 /** 稼働表が古ければ、裏で取り込み直す（開いたとき・アプリに戻ってきたとき）。 */

@@ -1,10 +1,10 @@
 // オフラインでも開けるように、アプリの部品をスマホに置いておく。
 // アプリを直したら VERSION を変える（変えると、次に開いたときに新しい部品に入れ替わる）。
-const VERSION = "v1.0.4";
+const VERSION = "v1.1.0";
 const CACHE = `helper-app-${VERSION}`;
 const FILES = [
   "./", "./index.html", "./manifest.webmanifest", "./css/style.css",
-  "./js/app.js", "./js/util.js", "./js/schedule.js", "./js/core.js", "./js/pdf.js", "./js/setup.js", "./js/tour.js",
+  "./js/app.js", "./js/util.js", "./js/schedule.js", "./js/core.js", "./js/pdf.js", "./js/setup.js", "./js/tour.js", "./js/gcal.js",
   "./img/form-blank.png", "./img/icon-192.png", "./img/icon-512.png", "./img/apple-touch-icon.png",
 ];
 

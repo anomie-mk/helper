@@ -312,3 +312,9 @@ a.btn { display: flex; align-items: center; justify-content: center; }
   box-shadow: 0 4px 16px rgba(0,0,0,.25);
 }
 .update-bar .btn { background: #fff; color: #1b5e20; border-color: #fff; }
+
+/* Googleカレンダー */
+.cal-list { margin: 8px 0 10px; padding-left: 20px; }
+.cal-done { color: var(--green); font-weight: 700; margin: 0 0 4px; }
+.cal-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.cal-line .cal-done { margin: 0; font-size: 14px; }
