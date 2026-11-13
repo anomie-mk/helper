@@ -115,12 +115,12 @@ export function filenameBase(applyIso, rows) {
 /**
  * 入力を確かめる。
  *  errors:   直さないとPDFを作れないもの [{ field, row, msg }]
- *  warnings: 作れるが確かめてほしいもの [{ row, msg }]
+ *  warnings: 作れるが確かめてほしいもの [{ row, msg, fields }]（fields は紙面で色を付けるマス）
  */
 export function validate(app, profile, schedule) {
   const errors = [], warnings = [];
   const err = (field, msg, row = null) => errors.push({ field, msg, row });
-  const warn = (msg, row = null) => warnings.push({ msg, row });
+  const warn = (msg, row = null, fields = []) => warnings.push({ msg, row, fields });
 
   // 申込者（セットアップの内容）
   if (!profile?.formName) err("profile", "申込書に書く氏名が入っていません。「設定」で入れてください。");
@@ -154,13 +154,12 @@ export function validate(app, profile, schedule) {
     const people = half(row.people);
     if (!/^\d{1,2}$/.test(people) || +people < 1) err("people", "希望人員は1以上の数字にしてください。", i);
     if (row.meeting && !MEETING_NAMES[row.meeting]) err("meeting", "打合せ希望形態を選び直してください。", i);
-    if (!row.meeting) warn(`${n}行目: 打合せ希望形態が選ばれていません（紙面に丸が付きません）。`, i);
+    if (!row.meeting) warn(`${n}行目: 打合せ希望形態が選ばれていません（紙面に丸が付きません）。`, i, ["meeting"]);
     const t = normalizeTime(row.time);
     if (!checkTime(t)) err("time", "希望時刻は数字で入れてください（例: 18 や 18:30）。", i);
 
-    if (r.start < today) warn(`${n}行目: 過ぎた日（${jpDate(r.start)}）が入っています。`, i);
-    if (applyDate && parseIso(r.start) < applyDate) warn(`${n}行目: 希望日が申込年月日より前です。`, i);
-    if (r.end && r.start.slice(0, 7) !== r.end.slice(0, 7)) warn(`${n}行目: 期間が月をまたいでいます。月ごとに行を分けると分かりやすくなります。`, i);
+    if (r.start < today) warn(`${n}行目: 過ぎた日（${jpDate(r.start)}）が入っています。`, i, ["period"]);
+    if (applyDate && parseIso(r.start) < applyDate) warn(`${n}行目: 希望日が申込年月日より前です。`, i, ["period"]);
 
     // 稼働表との照らし合わせ
     if (schedule && /^\d+$/.test(people)) {
@@ -171,8 +170,8 @@ export function validate(app, profile, schedule) {
         if (!info || info.avail == null) unknown.push(iso);
         else if (info.avail < +people) short.push(`${+iso.slice(8)}日(空き${info.avail}名)`);
       }
-      if (short.length) warn(`${n}行目: 空きが足りない日があります（${short.join("・")}）。頼んでも受けてもらえないかもしれません。`, i);
-      if (unknown.length) warn(`${n}行目: 稼働表がまだ無く、空きが分からない日があります。`, i);
+      if (short.length) warn(`${n}行目: 空きが足りない日があります（${short.join("・")}）。頼んでも受けてもらえないかもしれません。`, i, ["period", "people"]);
+      if (unknown.length) warn(`${n}行目: 稼働表がまだ無く、空きが分からない日があります。`, i, ["period"]);
     }
   });
 

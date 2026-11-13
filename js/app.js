@@ -10,7 +10,7 @@ import { runSetup } from "./setup.js";
 import { startTour } from "./tour.js";
 import * as G from "./gcal.js";
 
-export const APP_VERSION = "1.7.0";
+export const APP_VERSION = "1.8.0";
 const REFRESH_MINUTES = 120;     // 稼働表をこれより古ければ取り込み直す
 const HISTORY_MAX = 30;
 
@@ -406,7 +406,6 @@ function renderForm() {
       <div class="field" id="f-applyDate">
         <label for="apply-date">申込年月日</label>
         <input type="date" id="apply-date" value="${esc(a.applyDate)}">
-        <div class="muted small" id="apply-reiwa">${reiwaLabel(a.applyDate)}</div>
       </div>
       <div class="field" id="f-usageMonth">
         <span class="label">利用希望月分</span>
@@ -422,7 +421,10 @@ function renderForm() {
 const MEETING_SHORT = { denwa: "電話確認", toujitsu: "当日", zenjitsu: "前日" };
 
 /** 申込書の紙面に近い形の一覧（全行を一度に見る）。人員・打合せ・時刻はここで変え、行もここで消す。 */
-function renderPaper(errors = currentCheck().errors) {
+/** 入力の誤り・注意の「欄」→ 紙面のマス */
+const FIELD_CELL = { start: "period", end: "period", period: "period", people: "people", meeting: "meeting", time: "time" };
+
+function renderPaper(errors = currentCheck().errors, warnings = currentCheck().warnings) {
   const el = $("#paper");
   if (!el) return;
   const p = state.profile || {};
@@ -434,15 +436,18 @@ function renderPaper(errors = currentCheck().errors) {
     const r = C.tidyRow(r0);
     const ok = !!parseIso(r.start);
     const end = ok ? (r.end && parseIso(r.end) ? r.end : r.start) : "";   // 1日だけでも終了日＝開始日を書く
-    const bad = errors.some((e) => e.row === i);
+    // 直すところ（赤）・確かめてほしいところ（黄色）のマス
+    const errCells = new Set(errors.filter((e) => e.row === i).map((e) => FIELD_CELL[e.field]).filter(Boolean));
+    const warnCells = new Set(warnings.filter((w) => w.row === i).flatMap((w) => w.fields || []));
+    const mark = (cell) => (errCells.has(cell) ? " c-err" : warnCells.has(cell) ? " c-warn" : "");
     const time = C.normalizeTime(r.time);
-    return `<tr class="${bad ? "bad" : ""}" data-row="${i}">
+    return `<tr class="${errCells.size ? "has-err" : ""}" data-row="${i}">
       <td class="no">${i + 1}</td>
-      <td class="period"><button class="cell-btn plain" data-pick="month" data-row="${i}" aria-label="${i + 1}行目の月のカレンダーを出す">${ok ? `<span class="d">${md(r.start)}</span><span class="d">～${md(end)}</span>` : `<span class="miss">日付が未入力</span>`}</button></td>
+      <td class="period${mark("period")}"><button class="cell-btn plain" data-pick="month" data-row="${i}" aria-label="${i + 1}行目の月のカレンダーを出す">${ok ? `<span class="d">${md(r.start)}</span><span class="d">～${md(end)}</span>` : `<span class="miss">日付が未入力</span>`}</button></td>
       <td>${ok ? C.rowDates(r).length : ""}</td>
-      <td><button class="cell-btn" data-pick="people" data-row="${i}" aria-label="${i + 1}行目の希望人員を変える">${esc(half(r.people || "")) || "？"}</button></td>
-      <td class="meet"><button class="cell-btn" data-pick="meeting" data-row="${i}" aria-label="${i + 1}行目の打合せ希望形態を変える">${r.meeting ? `<span class="circle">${MEETING_SHORT[r.meeting]}</span>` : `<span class="miss">未選択</span>`}</button></td>
-      <td><button class="cell-btn" data-pick="time" data-row="${i}" aria-label="${i + 1}行目の希望時刻を変える">${time ? `<span class="tm">${esc(time)}</span><span class="tm-u">時頃</span>` : `<span class="muted">—</span>`}</button></td>
+      <td class="${mark("people")}"><button class="cell-btn" data-pick="people" data-row="${i}" aria-label="${i + 1}行目の希望人員を変える">${esc(half(r.people || "")) || "？"}</button></td>
+      <td class="meet${mark("meeting")}"><button class="cell-btn" data-pick="meeting" data-row="${i}" aria-label="${i + 1}行目の打合せ希望形態を変える">${r.meeting ? `<span class="circle">${MEETING_SHORT[r.meeting]}</span>` : `<span class="miss">未選択</span>`}</button></td>
+      <td class="${mark("time")}"><button class="cell-btn" data-pick="time" data-row="${i}" aria-label="${i + 1}行目の希望時刻を変える">${time ? `<span class="tm">${esc(time)}</span><span class="tm-u">時頃</span>` : `<span class="muted">—</span>`}</button></td>
       <td><button class="del-btn" data-del-row="${i}" aria-label="${i + 1}行目を消す">消す</button></td></tr>`;
   }).join("");
   el.innerHTML = `<div class="paper">
@@ -454,6 +459,8 @@ function renderPaper(errors = currentCheck().errors) {
       <tbody>${body}</tbody>
     </table>
   </div>
+  ${errors.some((e) => e.row != null) || warnings.some((w) => (w.fields || []).length)
+    ? `<div class="paper-legend"><span><i class="lg-err"></i>直すところ</span><span><i class="lg-warn"></i>確かめてほしいところ</span><span class="muted">（内容は下の「3」に出ています）</span></div>` : ""}
   <p class="muted small" style="margin-top:6px">${a.rows.length
     ? "<b>人員・打合せ・時刻を押すと変えられます。</b>「消す」でその行を消します。日付を変えるときは、利用期間を押すとその月のカレンダーに移ります。"
     : "上のカレンダーで日を押すと、ここに入ります。"}</p>`;
@@ -467,10 +474,9 @@ function renderCheck() {
   const el = $("#check");
   if (!el) return;
   const { errors, warnings } = currentCheck();
-  $("#apply-reiwa") && ($("#apply-reiwa").textContent = reiwaLabel(state.app.applyDate));
   const ut = $("#usage-text");
   if (ut) ut.innerHTML = `${esc(C.usageMonthText(state.app))}<span class="unit">月分</span>`;
-  renderPaper(errors);
+  renderPaper(errors, warnings);
 
   if (!errors.length) {
     el.innerHTML = `<div class="check-ok">✓ 申込書をつくれます（希望日 ${state.app.rows.length}行）</div>` +

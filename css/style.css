@@ -341,7 +341,6 @@ a.btn { display: flex; align-items: center; justify-content: center; }
 .paper-table td.period .d { display: block; white-space: nowrap; }
 .paper-table .circle { white-space: nowrap; }
 .paper-table tr.blank td { color: #bdbdbd; height: 30px; }
-.paper-table tr.bad td { background: var(--red-l); }
 .paper-table .miss { color: var(--red); font-size: 11px; }
 .paper-table .circle { display: inline-block; border: 1.5px solid #111; border-radius: 999px; padding: 1px 4px; font-size: 11px; }
 
@@ -367,3 +366,14 @@ a.btn { display: flex; align-items: center; justify-content: center; }
 .pick-input .unit { white-space: nowrap; }
 .cell-btn .tm { display: block; font-size: 14px; font-weight: 600; }
 .cell-btn .tm-u { display: block; font-size: 10px; }
+
+/* 紙面の色付け（赤＝直すところ、黄色＝確かめてほしいところ） */
+.paper-table td.c-err { background: var(--red-l); box-shadow: inset 0 0 0 2px var(--red); }
+.paper-table td.c-err .cell-btn { border-color: var(--red); background: #fff; }
+.paper-table td.c-warn { background: #fff3c4; box-shadow: inset 0 0 0 2px #e0a800; }
+.paper-table td.c-warn .cell-btn { border-color: #c79100; background: #fffaf0; }
+.paper-table tr.has-err td.no { color: var(--red); font-weight: 700; }
+.paper-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 13px; align-items: center; }
+.paper-legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+.paper-legend .lg-err { background: var(--red-l); box-shadow: inset 0 0 0 2px var(--red); }
+.paper-legend .lg-warn { background: #fff3c4; box-shadow: inset 0 0 0 2px #e0a800; }
