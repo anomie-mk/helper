@@ -334,17 +334,36 @@ a.btn { display: flex; align-items: center; justify-content: center; }
 .paper-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
 .paper-table th, .paper-table td { border: 1px solid #333; padding: 5px 2px; text-align: center; vertical-align: middle; line-height: 1.3; }
 .paper-table th { background: #f1f1f1; font-weight: 600; font-size: 11px; }
-.paper-table th:nth-child(1) { width: 7%; } .paper-table th:nth-child(2) { width: 33%; }
-.paper-table th:nth-child(3), .paper-table th:nth-child(4) { width: 10%; }
-.paper-table th:nth-child(5) { width: 22%; } .paper-table th:nth-child(6) { width: 18%; }
+.paper-table th:nth-child(1) { width: 6%; } .paper-table th:nth-child(2) { width: 26%; }
+.paper-table th:nth-child(3) { width: 8%; } .paper-table th:nth-child(4) { width: 11%; }
+.paper-table th:nth-child(5) { width: 21%; } .paper-table th:nth-child(6) { width: 15%; } .paper-table th:nth-child(7) { width: 13%; }
 .paper-table td.period { font-size: 12px; }
 .paper-table td.period .d { display: block; white-space: nowrap; }
 .paper-table .circle { white-space: nowrap; }
-.paper-table tr[data-goto] { cursor: pointer; }
-.paper-table tr[data-goto]:active { background: var(--sel-l); }
 .paper-table tr.blank td { color: #bdbdbd; height: 30px; }
 .paper-table tr.bad td { background: var(--red-l); }
 .paper-table .miss { color: var(--red); font-size: 11px; }
 .paper-table .circle { display: inline-block; border: 1.5px solid #111; border-radius: 999px; padding: 1px 4px; font-size: 11px; }
-.row-card.flash { box-shadow: 0 0 0 3px var(--sel); transition: box-shadow .2s; }
 
+
+/* 紙面で直す */
+.paper-table td { padding: 3px 1px; }
+.cell-btn { width: 100%; min-height: 40px; border: 1.5px dashed #8fb88f; border-radius: 6px; background: #f6fbf6; color: #111;
+  font: inherit; font-size: 12.5px; padding: 2px 1px; line-height: 1.25; }
+.cell-btn.plain { border-color: transparent; background: none; }
+.cell-btn:active { background: var(--sel-l); }
+.del-btn { width: 100%; min-height: 40px; border: 1.5px solid var(--red); border-radius: 6px; background: #fff; color: var(--red);
+  font-size: 12px; font-weight: 700; padding: 0; }
+.paper-table tr.blank td { height: 46px; }
+.usage-month { font-size: 20px; font-weight: 700; min-height: 48px; display: flex; align-items: center; gap: 4px; }
+.usage-month .unit { font-size: 15px; font-weight: 600; }
+
+/* 選ぶための小さな画面 */
+.dialog.pick { max-width: 420px; }
+.pick-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.pick-grid.three { grid-template-columns: repeat(3, 1fr); }
+.pick-input { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.pick-input input { flex: 1; min-width: 0; font-size: 18px; min-height: 48px; padding: 0 12px; border: 2px solid var(--line); border-radius: 10px; }
+.pick-input .unit { white-space: nowrap; }
+.cell-btn .tm { display: block; font-size: 14px; font-weight: 600; }
+.cell-btn .tm-u { display: block; font-size: 10px; }

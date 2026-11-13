@@ -10,7 +10,7 @@ import { runSetup } from "./setup.js";
 import { startTour } from "./tour.js";
 import * as G from "./gcal.js";
 
-export const APP_VERSION = "1.6.0";
+export const APP_VERSION = "1.7.0";
 const REFRESH_MINUTES = 120;     // 稼働表をこれより古ければ取り込み直す
 const HISTORY_MAX = 30;
 
@@ -146,7 +146,6 @@ function sortRows() {
 }
 
 function autoUsageMonth() {
-  if (state.app.usageManual) return;
   const first = state.app.rows.map((r) => C.tidyRow(r).start).filter(Boolean).sort()[0];
   if (first) state.app.usageMonth = +first.slice(5, 7);
 }
@@ -399,7 +398,6 @@ function renderForm() {
   if (!el) return;
   const p = state.profile || {};
   const a = state.app;
-  const rows = a.rows.map((r, i) => renderRow(r, i)).join("");
   el.innerHTML = `
     <div class="who-box">申込者: <b>${esc(p.formName || "（未設定）")}</b>　${esc(C.DISTRICT_NAMES[p.district] || "地区未設定")}<br>
       <span class="muted">${esc(p.address || "住所が未設定です")}</span>
@@ -411,44 +409,19 @@ function renderForm() {
         <div class="muted small" id="apply-reiwa">${reiwaLabel(a.applyDate)}</div>
       </div>
       <div class="field" id="f-usageMonth">
-        <label for="usage-month">利用希望月分</label>
-        <div class="inline"><select id="usage-month">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${+a.usageMonth === i + 1 ? "selected" : ""}>${i + 1}</option>`).join("")}</select><span class="unit">月分</span></div>
+        <span class="label">利用希望月分</span>
+        <div class="usage-month" id="usage-text">${esc(C.usageMonthText(a))}<span class="unit">月分</span></div>
+        <div class="muted small">希望日から自動で決まります</div>
       </div>
     </div>
     <div class="label" style="font-weight:700;margin-bottom:6px">申込書の紙面（PDFに書く内容）</div>
     <div id="paper"></div>
-    <div class="label" style="font-weight:700;margin:14px 0 6px">希望日を直す（${a.rows.length}/${C.ROW_COUNT}行）</div>
-    <div id="rows">${rows || `<div class="empty-rows">まだ希望日がありません。<br>上のカレンダーで日を押してください。</div>`}</div>
-    <button class="btn block" id="add-row" ${a.rows.length >= C.ROW_COUNT ? "disabled" : ""}>＋ 希望日を手で足す</button>
-    ${a.rows.length >= C.ROW_COUNT ? `<p class="muted small">申込書の行は${C.ROW_COUNT}行までです。</p>` : ""}`;
-}
-
-function renderRow(r, i) {
-  const days = C.rowDays(r);
-  const meeting = C.MEETING_OPTIONS.map(([k, n]) =>
-    `<button data-meeting="${k}" aria-pressed="${r.meeting === k}">${n.replace("での", "での<br>").replace("打合せ", "<br>打合せ")}</button>`).join("");
-  return `<div class="row-card" data-row="${i}">
-    <div class="row-head"><span class="no">${i + 1}行目</span><span class="sum">${esc(C.rowLabel(r))}</span>
-      <span class="days">${days ? `${days}日間` : ""}</span></div>
-    <div class="two">
-      <div class="field" data-f="start"><label>開始日</label><input type="date" data-k="start" value="${esc(r.start)}"></div>
-      <div class="field" data-f="end"><label>終了日 <span class="opt">1日だけなら空欄</span></label><input type="date" data-k="end" value="${esc(r.end)}" ${r.start ? `min="${esc(r.start)}"` : ""}></div>
-    </div>
-    <div class="two">
-      <div class="field" data-f="people"><span class="label">希望人員</span>
-        <div class="stepper"><button data-step="-1" aria-label="減らす">−</button><input type="text" inputmode="numeric" data-k="people" value="${esc(r.people)}" aria-label="希望人員"><button data-step="1" aria-label="増やす">＋</button></div></div>
-      <div class="field" data-f="time"><label>希望時刻 <span class="opt">空欄でもよい</span></label>
-        <div class="inline"><input type="text" inputmode="decimal" data-k="time" value="${esc(r.time)}" placeholder="例 18"><span class="unit">時頃</span></div></div>
-    </div>
-    <div class="field" data-f="meeting"><span class="label">打合せ希望形態</span><div class="seg">${meeting}</div></div>
-    <div class="row-hints"></div>
-    <div style="text-align:right"><button class="btn small danger" data-del="${i}">この行を消す</button></div>
-  </div>`;
+`;
 }
 
 const MEETING_SHORT = { denwa: "電話確認", toujitsu: "当日", zenjitsu: "前日" };
 
-/** 申込書の紙面に近い形の一覧（全行を一度に見る）。行を押すと、その行の入力欄へ移る。 */
+/** 申込書の紙面に近い形の一覧（全行を一度に見る）。人員・打合せ・時刻はここで変え、行もここで消す。 */
 function renderPaper(errors = currentCheck().errors) {
   const el = $("#paper");
   if (!el) return;
@@ -457,30 +430,33 @@ function renderPaper(errors = currentCheck().errors) {
   const md = (iso) => { const d = parseIso(iso); return d ? `${d.getMonth() + 1}月${d.getDate()}日` : ""; };
   const body = Array.from({ length: C.ROW_COUNT }, (_, i) => {
     const r0 = a.rows[i];
-    if (!r0) return `<tr class="blank"><td class="no">${i + 1}</td><td class="period"><span class="d">月　日</span><span class="d">～月　日</span></td><td></td><td></td><td></td><td></td></tr>`;
+    if (!r0) return `<tr class="blank"><td class="no">${i + 1}</td><td class="period"><span class="d">月　日</span><span class="d">～月　日</span></td><td></td><td></td><td></td><td></td><td></td></tr>`;
     const r = C.tidyRow(r0);
     const ok = !!parseIso(r.start);
     const end = ok ? (r.end && parseIso(r.end) ? r.end : r.start) : "";   // 1日だけでも終了日＝開始日を書く
     const bad = errors.some((e) => e.row === i);
     const time = C.normalizeTime(r.time);
-    return `<tr class="${bad ? "bad" : ""}" data-goto="${i}">
+    return `<tr class="${bad ? "bad" : ""}" data-row="${i}">
       <td class="no">${i + 1}</td>
-      <td class="period">${ok ? `<span class="d">${md(r.start)}</span><span class="d">～${md(end)}</span>` : `<span class="miss">日付が未入力</span>`}</td>
+      <td class="period"><button class="cell-btn plain" data-pick="month" data-row="${i}" aria-label="${i + 1}行目の月のカレンダーを出す">${ok ? `<span class="d">${md(r.start)}</span><span class="d">～${md(end)}</span>` : `<span class="miss">日付が未入力</span>`}</button></td>
       <td>${ok ? C.rowDates(r).length : ""}</td>
-      <td>${esc(half(r.people || ""))}</td>
-      <td class="meet">${r.meeting ? `<span class="circle">${MEETING_SHORT[r.meeting]}</span>` : `<span class="miss">未選択</span>`}</td>
-      <td>${time ? `${esc(time)}時頃` : ""}</td></tr>`;
+      <td><button class="cell-btn" data-pick="people" data-row="${i}" aria-label="${i + 1}行目の希望人員を変える">${esc(half(r.people || "")) || "？"}</button></td>
+      <td class="meet"><button class="cell-btn" data-pick="meeting" data-row="${i}" aria-label="${i + 1}行目の打合せ希望形態を変える">${r.meeting ? `<span class="circle">${MEETING_SHORT[r.meeting]}</span>` : `<span class="miss">未選択</span>`}</button></td>
+      <td><button class="cell-btn" data-pick="time" data-row="${i}" aria-label="${i + 1}行目の希望時刻を変える">${time ? `<span class="tm">${esc(time)}</span><span class="tm-u">時頃</span>` : `<span class="muted">—</span>`}</button></td>
+      <td><button class="del-btn" data-del-row="${i}" aria-label="${i + 1}行目を消す">消す</button></td></tr>`;
   }).join("");
   el.innerHTML = `<div class="paper">
     <div class="paper-title">酪農ヘルパー利用申込書</div>
-    <div class="paper-meta"><span>${esc(reiwaLabel(a.applyDate))}</span><span class="month"><b>${+a.usageMonth}</b>月分</span></div>
+    <div class="paper-meta"><span>${esc(reiwaLabel(a.applyDate))}</span><span class="month"><b>${esc(C.usageMonthText(a))}</b>月分</span></div>
     <div class="paper-meta sub"><span>${esc(C.DISTRICT_NAMES[p.district] || "地区未設定")}</span><span>${esc(p.formName || "氏名未設定")}</span></div>
     <table class="paper-table">
-      <thead><tr><th></th><th>利用期間</th><th>日数</th><th>人員</th><th>打合せ<br>希望形態</th><th>希望<br>時刻</th></tr></thead>
+      <thead><tr><th></th><th>利用期間</th><th>日数</th><th>人員</th><th>打合せ<br>希望形態</th><th>希望<br>時刻</th><th></th></tr></thead>
       <tbody>${body}</tbody>
     </table>
   </div>
-  <p class="muted small" style="margin-top:6px">${a.rows.length ? "行を押すと、下のその行の入力欄に移ります。" : "上のカレンダーで日を押すと、ここに入ります。"}</p>`;
+  <p class="muted small" style="margin-top:6px">${a.rows.length
+    ? "<b>人員・打合せ・時刻を押すと変えられます。</b>「消す」でその行を消します。日付を変えるときは、利用期間を押すとその月のカレンダーに移ります。"
+    : "上のカレンダーで日を押すと、ここに入ります。"}</p>`;
 }
 
 function currentCheck() {
@@ -491,26 +467,9 @@ function renderCheck() {
   const el = $("#check");
   if (!el) return;
   const { errors, warnings } = currentCheck();
-  // 行ごとのヒント（行の中にも出す）
-  $$(".row-card").forEach((card) => {
-    const i = +card.dataset.row;
-    const errs = errors.filter((e) => e.row === i);
-    const warns = warnings.filter((w) => w.row === i);
-    const show = state.ui.showAllErrors || card.dataset.touched === "1";
-    card.classList.toggle("has-err", show && errs.length > 0);
-    $$(".field", card).forEach((f) => f.classList.toggle("bad", show && errs.some((e) => e.field === f.dataset.f)));
-    $(".row-hints", card).innerHTML =
-      (show ? errs.map((e) => `<div class="hint err">${esc(e.msg)}</div>`).join("") : "") +
-      warns.map((w) => `<div class="hint warn">${esc(w.msg.replace(/^\d+行目: /, ""))}</div>`).join("");
-    // 見出し（日付・日数）も入力に合わせて直す
-    const r = state.app.rows[i];
-    if (r) {
-      $(".sum", card).textContent = C.rowLabel(r);
-      const d = C.rowDays(r);
-      $(".days", card).textContent = d ? `${d}日間` : "";
-    }
-  });
   $("#apply-reiwa") && ($("#apply-reiwa").textContent = reiwaLabel(state.app.applyDate));
+  const ut = $("#usage-text");
+  if (ut) ut.innerHTML = `${esc(C.usageMonthText(state.app))}<span class="unit">月分</span>`;
   renderPaper(errors);
 
   if (!errors.length) {
@@ -527,6 +486,65 @@ function renderCheck() {
   }
 }
 
+/** 選ぶための小さな画面。選んだ値（やめたら undefined）を返す。input を付けると、数字を打つ欄も出す。 */
+function pickDialog(title, choices, { note = "", input = null } = {}) {
+  return new Promise((resolve) => {
+    const back = document.createElement("div");
+    back.className = "dialog-back";
+    back.innerHTML = `<div class="dialog pick" role="dialog" aria-modal="true">
+      <h3>${esc(title)}</h3>${note ? `<p class="muted small" style="margin:0 0 8px">${note}</p>` : ""}
+      <div class="pick-grid ${choices.length > 4 ? "three" : ""}">${choices.map((c, i) => `<button class="btn ${c.on ? "primary" : ""}" data-i="${i}">${c.label}</button>`).join("")}</div>
+      ${input ? `<div class="pick-input"><input type="text" inputmode="decimal" id="pick-input" value="${esc(input.value)}" placeholder="${esc(input.placeholder)}" aria-label="${esc(title)}"><span class="unit">${esc(input.unit)}</span><button class="btn primary" id="pick-ok">決める</button></div>` : ""}
+      <div class="btn-row" style="margin-top:12px"><button class="btn" data-cancel>やめる</button></div></div>`;
+    document.body.appendChild(back);
+    const done = (v) => { back.remove(); resolve(v); };
+    back.addEventListener("click", (e) => {
+      if (e.target === back || e.target.closest("[data-cancel]")) return done(undefined);
+      const b = e.target.closest("[data-i]");
+      if (b) return done(choices[+b.dataset.i].value);
+      if (e.target.closest("#pick-ok")) return done({ input: $("#pick-input", back).value });
+    });
+    $("#pick-input", back)?.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); done({ input: e.target.value }); } });
+  });
+}
+
+/** 紙面のセルを押した: 人員・打合せ・時刻を変える／その行の月のカレンダーへ移る。 */
+async function onPaperPick(kind, i) {
+  const row = state.app.rows[i];
+  if (!row) return;
+  const label = C.rowLabel(row) || `${i + 1}行目`;
+  if (kind === "month") {
+    const start = C.tidyRow(row).start;
+    if (start) state.ui.viewYm = start.slice(0, 7);
+    renderCalendar();
+    $("#card-cal")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (kind === "people") {
+    const cur = +half(row.people) || 0;
+    const v = await pickDialog(`${i + 1}行目の希望人員`, Array.from({ length: 9 }, (_, k) => ({ value: String(k + 1), label: `${k + 1}名`, on: cur === k + 1 })), { note: esc(label) });
+    if (v === undefined) return;
+    row.people = v;
+  } else if (kind === "meeting") {
+    const v = await pickDialog(`${i + 1}行目の打合せ希望形態`, [
+      ...C.MEETING_OPTIONS.map(([k, n]) => ({ value: k, label: n, on: row.meeting === k })),
+      { value: "", label: "選ばない", on: !row.meeting },
+    ], { note: esc(label) });
+    if (v === undefined) return;
+    row.meeting = v;
+  } else if (kind === "time") {
+    const v = await pickDialog(`${i + 1}行目の希望時刻`, [{ value: "", label: "空欄にする（書かない）", on: !row.time }],
+      { note: `${esc(label)}<br>数字を入れて「決める」（例: 18 や 18:30）`, input: { value: C.normalizeTime(row.time), placeholder: "例 18", unit: "時頃" } });
+    if (v === undefined) return;
+    const time = typeof v === "object" ? C.normalizeTime(v.input) : v;
+    if (!C.checkTime(time)) { toast("希望時刻は数字で入れてください（例: 18 や 18:30）", 4000); return onPaperPick("time", i); }
+    row.time = time;
+  }
+  saveDraft();
+  renderCalendar();
+  renderCheck();
+}
+
 // ---- PDFをつくる・保存 ------------------------------------------------------------
 
 async function onMakePdf() {
@@ -535,7 +553,7 @@ async function onMakePdf() {
     state.ui.showAllErrors = true;
     renderCheck();
     const firstRow = errors.find((e) => e.row != null);
-    const target = firstRow ? $(`.row-card[data-row="${firstRow.row}"]`) : $("#check");
+    const target = firstRow ? $(`#paper tr[data-row="${firstRow.row}"]`) : $("#check");
     target?.scrollIntoView({ behavior: "smooth", block: "center" });
     toast(`直すところが${errors.length}か所あります。赤い印のところを見てください。`, 4000);
     return;
@@ -727,7 +745,7 @@ function renderHistory() {
     const when = new Date(h.createdAt);
     return `<div class="card hist-item" data-id="${h.id}">
       <div class="t">${esc(h.filename)}</div>
-      <div class="muted small">${when.getMonth() + 1}月${when.getDate()}日 ${pad2(when.getHours())}:${pad2(when.getMinutes())} につくった ／ ${+h.app.usageMonth}月分・申込日 ${esc(reiwaLabel(h.app.applyDate))}</div>
+      <div class="muted small">${when.getMonth() + 1}月${when.getDate()}日 ${pad2(when.getHours())}:${pad2(when.getMinutes())} につくった ／ ${esc(C.usageMonthText(h.app))}月分・申込日 ${esc(reiwaLabel(h.app.applyDate))}</div>
       <ul>${rows}</ul>
       <div class="btn-row"><button class="btn small" data-h="pdf">📄 もう一度PDFに</button><button class="btn small" data-h="load">✏️ 直して使う</button></div>
       <details class="cal-hist"><summary>📅 Googleカレンダーに入れる</summary>
@@ -925,41 +943,6 @@ function bindEvents() {
     const sortB = t.closest("[data-sort]");
     if (sortB) { state.ui.listSort = sortB.dataset.sort; state.ui.listOpen = true; return renderCalendar(); }
 
-    const card = t.closest(".row-card");
-    if (card) {
-      const i = +card.dataset.row;
-      const row = state.app.rows[i];
-      const del = t.closest("[data-del]");
-      if (del) {
-        state.app.rows.splice(i, 1);
-        autoUsageMonth();
-        return afterRowsChanged(true);
-      }
-      const mb = t.closest("[data-meeting]");
-      if (mb) {
-        row.meeting = row.meeting === mb.dataset.meeting ? "" : mb.dataset.meeting;
-        $$("[data-meeting]", card).forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.meeting === row.meeting)));
-        saveDraft();
-        return renderCheck();
-      }
-      const st = t.closest("[data-step]");
-      if (st) {
-        const n = Math.max(1, Math.min(9, (parseInt(row.people, 10) || 0) + +st.dataset.step));
-        row.people = String(n);
-        $("[data-k=people]", card).value = row.people;
-        card.dataset.touched = "1";
-        saveDraft();
-        renderCalendar();
-        return renderCheck();
-      }
-    }
-    if (t.closest("#add-row")) {
-      if (state.app.rows.length >= C.ROW_COUNT) return;
-      state.app.rows.push(C.newRow(state.profile || {}, "", "", String(state.ui.people)));
-      afterRowsChanged(true);
-      last($$(".row-card"))?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
-    }
     if (t.closest("#make-pdf")) return onMakePdf();
     if (t.closest("#clear-checks")) {
       const n = state.app.rows.filter((r) => C.rowDates(r).length).length;
@@ -973,13 +956,18 @@ function bindEvents() {
       }
       return;
     }
-    const goRow = t.closest("[data-goto]");
-    if (goRow && goRow.closest("#paper")) {
-      const card = $(`.row-card[data-row="${goRow.dataset.goto}"]`);
-      if (card) {
-        card.scrollIntoView({ behavior: "smooth", block: "center" });
-        card.classList.add("flash");
-        setTimeout(() => card.classList.remove("flash"), 1200);
+    const pick = t.closest("[data-pick]");
+    if (pick && pick.closest("#paper")) return onPaperPick(pick.dataset.pick, +pick.dataset.row);
+    const delRow = t.closest("[data-del-row]");
+    if (delRow && delRow.closest("#paper")) {
+      const i = +delRow.dataset.delRow;
+      const r = state.app.rows[i];
+      if (!r) return;
+      if (await confirmDialog(`${i + 1}行目を消しますか？`, `<p>${esc(C.rowLabel(r) || "日付が未入力の行")}</p>`, "消す", true)) {
+        state.app.rows.splice(i, 1);
+        autoUsageMonth();
+        afterRowsChanged(true);
+        toast(`${i + 1}行目を消しました。`);
       }
       return;
     }
@@ -1041,19 +1029,6 @@ function bindEvents() {
     }
   });
 
-  // 入力欄（文字を打つたびに）
-  view.addEventListener("input", (e) => {
-    const t = e.target;
-    const card = t.closest(".row-card");
-    if (card && t.dataset.k) {
-      const row = state.app.rows[+card.dataset.row];
-      row[t.dataset.k] = t.value;
-      if (t.dataset.k === "people" || t.dataset.k === "time") card.dataset.touched = "1";
-      saveDraft();
-      renderCheck();
-      if (t.dataset.k === "people") renderCalendar();
-    }
-  });
   // 日付・選択（決めたとき）
   view.addEventListener("change", (e) => {
     const t = e.target;
@@ -1061,33 +1036,6 @@ function bindEvents() {
       state.app.applyDate = t.value;
       saveDraft();
       return renderCheck();
-    }
-    if (t.id === "usage-month") {
-      state.app.usageMonth = +t.value;
-      state.app.usageManual = true;
-      saveDraft();
-      return renderCheck();
-    }
-    const card = t.closest(".row-card");
-    if (card && (t.dataset.k === "start" || t.dataset.k === "end")) {
-      const i = +card.dataset.row;
-      const row = state.app.rows[i];
-      row[t.dataset.k] = t.value;
-      card.dataset.touched = "1";
-      // 開始日を入れたとき、終了日が開始日より前なら空にする
-      if (t.dataset.k === "start" && row.end && row.end < row.start) row.end = "";
-      state.app.rows[i] = C.tidyRow(row);
-      if (t.dataset.k === "start" && row.start) state.ui.viewYm = row.start.slice(0, 7);
-      autoUsageMonth();
-      saveDraft();
-      renderForm();
-      // 触った行の印を残す
-      const again = $(`.row-card[data-row="${i}"]`);
-      if (again) again.dataset.touched = "1";
-      renderCalendar();
-      renderCheck();
-      const sel = $("#usage-month");
-      if (sel) sel.value = String(state.app.usageMonth);
     }
   });
   view.addEventListener("toggle", (e) => {

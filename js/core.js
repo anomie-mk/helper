@@ -129,12 +129,10 @@ export function validate(app, profile, schedule) {
 
   const applyDate = parseIso(app.applyDate);
   if (!applyDate) err("applyDate", "申込年月日を選んでください。");
-  const um = +app.usageMonth;
-  if (!(um >= 1 && um <= 12)) err("usageMonth", "利用希望月分（◯月分）を選んでください。");
 
   const used = app.rows.filter((r) => r.start || r.end);
   if (!used.length) {
-    err("rows", "希望日がまだありません。カレンダーで日を押すか、「＋ 希望日を足す」で入れてください。");
+    err("rows", "希望日がまだありません。上のカレンダーで日を押してください。");
   }
   if (app.rows.length > ROW_COUNT) err("rows", `希望日は${ROW_COUNT}行までです（申込書の行の数）。行を減らしてください。`);
 
@@ -184,14 +182,6 @@ export function validate(app, profile, schedule) {
   app.rows.forEach((row) => rowDates(row).forEach((d) => { if (seen.has(d)) dup.add(d); seen.add(d); }));
   if (dup.size) err("rows", `同じ日が2つの行に入っています（${[...dup].sort().map((d) => jpDate(d)).join("・")}）。`);
 
-  // 利用希望月分と希望日の月
-  if (um >= 1 && um <= 12 && used.length) {
-    const months = [...new Set(app.rows.flatMap((r) => rowDates(r)).map((d) => +d.slice(5, 7)))].sort((a, b) => a - b);
-    if (months.length && !months.includes(um)) {
-      warn(`利用希望月分（${um}月分）と希望日の月（${months.map((m) => `${m}月`).join("・")}）が違います。`, null);
-    }
-  }
-
   // 申込の期限（稼働表の注意書きより）
   deadlineNotes(app.rows).forEach((m) => warn(m, null));
   return { errors, warnings };
@@ -231,7 +221,7 @@ export function toFormData(app) {
     apply_year: a.getFullYear() - REIWA_OFFSET,
     apply_month: a.getMonth() + 1,
     apply_day: a.getDate(),
-    usage_month: +app.usageMonth,
+    usage_month: usageMonthText(app),
     rows: app.rows.map((row) => {
       const r = tidyRow(row);
       const s = parseIso(r.start), e = r.end ? parseIso(r.end) : s;   // 1日だけの行は、終了日＝開始日
@@ -276,4 +266,15 @@ export function mailContent(app, profile = {}) {
   const user = (profile.userName || profile.formName || "").trim();
   const body = [`利用者名：${user}`, `利用希望月：${usageMonthsLabel(app.rows)}`].join("\n");
   return { subject: MAIL_SUBJECT, body };
+}
+
+/** 申込書の「◯月分」に書く月（希望日の入っている月を古い順に。希望日が無ければ app.usageMonth）。 */
+export function usageMonthList(app) {
+  const ms = usageMonths(app.rows || []).map((x) => x.month);
+  return ms.length ? ms : [+app.usageMonth || nextMonth(new Date().getMonth() + 1)];
+}
+
+/** 例: "12" / "12・1" */
+export function usageMonthText(app) {
+  return usageMonthList(app).join("・");
 }

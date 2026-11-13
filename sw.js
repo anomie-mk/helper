@@ -1,6 +1,6 @@
 // オフラインでも開けるように、アプリの部品をスマホに置いておく。
 // アプリを直したら VERSION を変える（変えると、次に開いたときに新しい部品に入れ替わる）。
-const VERSION = "v1.6.0";
+const VERSION = "v1.7.0";
 const CACHE = `helper-app-${VERSION}`;
 const FILES = [
   "./", "./index.html", "./manifest.webmanifest", "./css/style.css",

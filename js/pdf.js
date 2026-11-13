@@ -111,7 +111,13 @@ export async function renderForm(data, profile) {
   centered(...APPLY_DATE.year, data.apply_year, 12);
   centered(...APPLY_DATE.month, data.apply_month, 12);
   centered(...APPLY_DATE.day, data.apply_day, 12);
-  centered(...MONTH_BOX, data.usage_month, 16);
+  // 「12・1」のような複数月は、枠（幅およそ110）に収まるところまで字を小さくする
+  const um = String(data.usage_month ?? "");
+  let umSize = 16;
+  c.font = `500 ${umSize * pt}px ${FONT}`;
+  const umW = c.measureText(um).width, umMax = 96 * sx;
+  if (umW > umMax) umSize = Math.max(8, umSize * umMax / umW);
+  centered(...MONTH_BOX, um, umSize);
 
   // 希望日の行
   data.rows.slice(0, ROW_Y.length).forEach((row, i) => {
